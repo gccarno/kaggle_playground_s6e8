@@ -67,12 +67,39 @@ distinction is non-obvious in code, say which one it is in a comment.
 
 ## Pre-registered improvement gate
 
-**TBD — deliberately unset.**
+**Provisional: +0.0002 OOF AUC.** Measured, not invented — but a floor, not the final gate.
 
-§4 says the gate should be ≈1σ of the measured OOF↔LB residual, and that number does not exist until
-there are ~10 runs with both an OOF and an LB score. Do not invent a gate before there is data behind
-it. Once `experiments/runs.csv` has enough paired rows, compute Spearman(OOF, LB) and the residual σ,
-write the gate here, and hold every subsequent probe to it.
+§4 says the gate should be ≈1σ of the OOF↔LB residual, which needs ~10 paired runs. Until those
+exist, the gate comes from a **seed twin**: run `22de9888` is the champion with only LightGBM's
+`random_state` changed (42→43), the CV partition untouched.
+
+| measurement | value |
+|---|---|
+| seed-twin \|ΔOOF\| — OOF movement when *nothing meaningful* changed | 0.000066 |
+| seed-twin \|ΔLB\| | 0.000090 |
+| 3 × paired-bootstrap SE of the ΔAUC | 0.000089 |
+| seed-twin disagreement rate at 0.5 | 1.45% |
+| **provisional gate** (≈3× the seed noise) | **+0.0002** |
+
+Why this is a floor and not the answer: it captures *estimation* noise but not OOF→LB *transfer*
+noise, so it can only ever be too permissive. Replace it with the measured residual σ as soon as
+there are enough pairs, and re-judge any probe that cleared it by less than the new σ.
+
+**A paired-bootstrap CI excluding zero is not a pass.** The seed twin's ΔOOF of 0.000066 is
+"distinguishable" by that test — two seeds genuinely are two different models — and it is still pure
+noise for decision-making, because another seed would move it again. Only the gate decides shipping.
+
+### Early OOF↔LB signal (n=2 — not yet a measurement)
+
+| run | OOF | LB | LB − OOF |
+|---|---|---|---|
+| `ba6c676a` | 0.963320 | 0.96500 | +0.001680 |
+| `22de9888` | 0.963254 | 0.96491 | +0.001656 |
+
+The offset is positive and so far strikingly stable (the two differ by 0.000024). Positive is the
+expected direction: an OOF model sees 4/5 of the data while the submission averages all 5 fold-models.
+Two points prove nothing — but if this holds, OOF will be a reliable proxy and §4's licence to stop
+submitting arrives early.
 
 ## Experiment log
 
