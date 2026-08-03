@@ -49,7 +49,7 @@ RUN_COLUMNS = [
 # at the time. Anything capable of overturning a probe's verdict belongs in the log.
 PASSTHROUGH = ["notebook_runtime_sec", "n_features", "n_folds", "cv_seed",
                "fold_auc_mean", "fold_auc_std", "final_oof_auc",
-               "best_iters", "fold_aucs", "model_seed"]
+               "best_iters", "fold_aucs", "model_seed", "te_cols", "engineered", "run_tag"]
 
 # Artifacts to archive per run, in addition to anything matching PRED_GLOBS.
 PRED_FILES = ["submission.csv"]

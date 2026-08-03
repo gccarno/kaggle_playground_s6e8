@@ -27,15 +27,24 @@ _spec = importlib.util.spec_from_file_location("collect_run", Path(__file__).wit
 cr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cr)
 
-# MUST mirror DEFAULTS in s6e8-model.ipynb -- the notebook asserts it receives no
-# unknown keys, and --diff-vs compares against these values, so a stale copy here
-# silently makes "strict twin" checks compare against the wrong baseline.
-DEFAULTS = {
-    "run_tag": "champion", "learner": "lgb", "model_seed": 42,
-    "fe_interaction": False, "fe_composition": False, "fe_normalization": False,
-    "drop_flat_cats": False, "te_cols": [], "te_smooth": 20.0, "te_inner_folds": 5,
-    "lgb_params": {}, "n_estimators": 8000, "early_stop": 400,
-}
+def _load_defaults():
+    """Read DEFAULTS straight out of the notebook instead of mirroring it here.
+
+    A hand-maintained copy drifted twice in one session, and the second time it made
+    --diff-vs compare against a baseline missing the very key the probe was changing,
+    so a genuine one-field twin was reported as "0 fields differ". Parsing the single
+    source of truth removes that whole class of bug."""
+    import ast, re
+    src = "".join(
+        "".join(c["source"]) for c in json.loads(NOTEBOOK.read_text(encoding="utf-8"))["cells"]
+        if c["cell_type"] == "code")
+    m = re.search(r"^DEFAULTS = (\{.*?^\})", src, re.S | re.M)
+    if not m:
+        raise RuntimeError("could not find a DEFAULTS literal in the notebook")
+    return ast.literal_eval(m.group(1))
+
+
+DEFAULTS = _load_defaults()
 
 
 def git(*args):
@@ -48,7 +57,10 @@ def check_strict_twin(cfg, baseline):
     moved two knobs cannot attribute its delta to either, so it is not evidence --
     refuse to run it rather than produce an uninterpretable row."""
     a, b = {**DEFAULTS, **baseline}, {**DEFAULTS, **cfg}
-    diff = [k for k in a if a[k] != b[k] and k != "run_tag"]
+    # Iterate the UNION: iterating only `a` made a probe that introduces a brand-new
+    # key invisible, which is exactly the case a strict-twin check exists to catch.
+    diff = [k for k in (set(a) | set(b))
+            if a.get(k, "<absent>") != b.get(k, "<absent>") and k != "run_tag"]
     if len(diff) != 1:
         raise SystemExit(
             f"NOT A STRICT TWIN: {len(diff)} fields differ from the baseline: {diff}\n"

@@ -99,23 +99,28 @@ noise for decision-making, because another seed would move it again. Only the ga
 | `6b671f87` | champion @ES400 | 0.963405 | 0.96521 | +0.001805 |
 | `f64e2781` | **B6 target encoding** | **0.966384** | **0.96788** | **+0.001496** |
 
-Spearman(OOF, LB) = **+1.000** across all five. Offset is positive because an OOF model sees 4/5 of
-the data while the submission averages all 5 fold-models.
+| `6e3dd7c3` | B7 TE cross | 0.966353 | 0.96806 | +0.001707 |
 
-**The offset is NOT model-family invariant.** The four non-TE runs sit at +0.001719 ± 0.000066. B6
-came in at +0.001496 — **3.37σ low**. Before submitting B6 I pre-registered a predicted LB of
-0.96810 ± 0.0002 from this calibration; it landed at 0.96788, outside the band and in the direction
-that target-encoding optimism predicts (the val-fold encoding is built on 4/5 of train, so OOF
-benefits marginally more than test does).
+**n=6: offset +0.001680 ± 0.000104, Spearman(OOF, LB) = +0.943, residual σ about the fit = 0.000085.**
+The offset is positive because an OOF model sees 4/5 of the data while the submission averages all
+5 fold-models.
 
-Consequences, which bind on every later decision:
+#### A retracted claim, kept here on purpose
 
-- **Within a model family, the gate stands.** Every probe is a strict twin, so this is the usual case.
-- **Across families, do not compare OOF at gate resolution.** A TE model needs ≈0.0002 subtracted
-  from its OOF before being compared with a non-TE model. Blend weights fitted on OOF across families
-  inherit the same bias.
-- The 0.0002 family offset is itself estimated from a single TE run. Treat it as an order of
-  magnitude, not a constant, and re-estimate as more TE runs land.
+After B6 I recorded that "the offset is not model-family invariant — TE models carry ≈0.0002 more OOF
+optimism," because B6's +0.001496 sat 3.37σ below the four non-TE runs. **That was over-read from a
+single point and B7 refutes it**: B7 is also target-encoded and came in at +0.001707, squarely inside
+the non-TE range. Against all six runs B6 is −1.8σ — an unremarkable low draw, not a family effect.
+
+The real lesson is about the *estimate*, not the encoder: a σ computed from 4 nearly-identical models
+spanning 0.00036 of OOF was too small (0.000064) and too confident. With 6 points and a 3× wider OOF
+span it is 0.000085. **Do not treat a σ estimated from a narrow OOF range as valid outside that
+range**, and do not promote a single outlier to a structural finding.
+
+The one inversion in Spearman is B6 vs B7, which differ by 0.00003 OOF — far inside noise, so an
+inversion there is expected rather than alarming.
+
+Gate remains **+0.0002** ≈ 2.4σ of the current residual. Still conservative.
 
 ## Experiment log
 
