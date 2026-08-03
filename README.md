@@ -89,6 +89,75 @@ there are enough pairs, and re-judge any probe that cleared it by less than the 
 "distinguishable" by that test — two seeds genuinely are two different models — and it is still pure
 noise for decision-making, because another seed would move it again. Only the gate decides shipping.
 
+### OOF↔LB calibration (n=8)
+
+| run | tag | OOF | LB | offset |
+|---|---|---|---|---|
+| `ba6c676a` | anchor | 0.963320 | 0.96500 | +0.001680 |
+| `22de9888` | seed twin | 0.963254 | 0.96491 | +0.001656 |
+| `66e3dede` | B1 interaction ratios | 0.963047 | 0.96478 | +0.001733 |
+| `6b671f87` | champion @ES400 | 0.963405 | 0.96521 | +0.001805 |
+| `f64e2781` | B6 target encoding | 0.966384 | 0.96788 | +0.001496 |
+| `6e3dd7c3` | B7 TE cross | 0.966353 | 0.96806 | +0.001707 |
+| `9e68c7ce` | B8 num_leaves 255 | 0.966135 | 0.96781 | +0.001675 |
+| **`b171c0cf`** | **blend (champion)** | **0.966902** | **0.96831** | +0.001408 |
+
+**offset +0.001645 ± 0.000130, Spearman(OOF, LB) = +0.976, residual σ = 0.000096.**
+
+Gate stays **+0.0002** ≈ 2σ. Offset is positive because an OOF model sees 4/5 of the data while a
+submission averages all 5 fold-models.
+
+#### A retracted claim, kept on purpose
+
+After B6 I recorded that "the offset is not model-family invariant — TE models carry ≈0.0002 more OOF
+optimism," because B6's +0.001496 sat 3.37σ below the four non-TE runs then available. **B7 refuted
+it**: also target-encoded, it landed at +0.001707, inside the non-TE range. Against all eight runs B6
+is an unremarkable low draw.
+
+The lesson is about the estimate, not the encoder. A σ computed from four nearly-identical models
+spanning 0.00036 of OOF was too small (0.000064) and too confident; over a 3× wider span it is
+0.000096. **Do not treat a σ estimated from a narrow OOF range as valid outside that range, and do
+not promote a single outlier to a structural finding.** This is the same error the playbook warns
+about for public-LB scores, committed against our own metric.
+
+## Leakage discipline
+
+The load-bearing constraint (§2). Target encoders, quantile bin edges, scalers, imputers and
+category vocabularies are:
+
+- **fit on the training fold only**, applied to the val/test fold;
+- **re-fit at every usage site** — feature selection, HPO, and the final stack each get their own fit,
+  never one global fit before the CV loop;
+- unseen categories at inference map to a reserved "unknown" level, never raise.
+
+An *unsupervised* label mapping (ordinal-coding a category vocabulary over train ∪ test) is not a
+leak, because it never touches `y`. A *supervised* one (target/count encoding) is. When the
+distinction is non-obvious in code, say which one it is in a comment.
+
+## Pre-registered improvement gate
+
+**Provisional: +0.0002 OOF AUC.** Measured, not invented — but a floor, not the final gate.
+
+§4 says the gate should be ≈1σ of the OOF↔LB residual, which needs ~10 paired runs. Until those
+exist, the gate comes from a **seed twin**: run `22de9888` is the champion with only LightGBM's
+`random_state` changed (42→43), the CV partition untouched.
+
+| measurement | value |
+|---|---|
+| seed-twin \|ΔOOF\| — OOF movement when *nothing meaningful* changed | 0.000066 |
+| seed-twin \|ΔLB\| | 0.000090 |
+| 3 × paired-bootstrap SE of the ΔAUC | 0.000089 |
+| seed-twin disagreement rate at 0.5 | 1.45% |
+| **provisional gate** (≈3× the seed noise) | **+0.0002** |
+
+Why this is a floor and not the answer: it captures *estimation* noise but not OOF→LB *transfer*
+noise, so it can only ever be too permissive. Replace it with the measured residual σ as soon as
+there are enough pairs, and re-judge any probe that cleared it by less than the new σ.
+
+**A paired-bootstrap CI excluding zero is not a pass.** The seed twin's ΔOOF of 0.000066 is
+"distinguishable" by that test — two seeds genuinely are two different models — and it is still pure
+noise for decision-making, because another seed would move it again. Only the gate decides shipping.
+
 ### OOF↔LB calibration (n=5) — and its one known limit
 
 | run | tag | OOF | LB | offset |
