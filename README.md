@@ -1,0 +1,90 @@
+# Kaggle Playground Series S6E8 — Predicting Smartphone Addiction
+
+This file is the **contract**. The decisions recorded here are made once and never revisited, because
+every prediction artifact in `experiments/preds/` is keyed to them. Changing any of them
+retroactively invalidates cross-run blending. See `KAGGLE_PLAYBOOK.md` §1.
+
+## Competition facts
+
+| | |
+|---|---|
+| Slug | `playground-series-s6e8` |
+| Title | Predicting Smartphone Addiction |
+| Task | Binary classification |
+| Target | `addicted_label` ∈ {0, 1} |
+| **Submission** | `id,addicted_label` where the value is a **probability in [0,1]**, not a hard label |
+| **Metric** | **ROC AUC** |
+| Train | 691,369 rows × 12 features |
+| Test | 296,302 rows |
+| Positive rate | 0.709424 |
+| Deadline | 2026-08-31 23:59 UTC |
+| Limits | 10 submissions/day, max team size 3 |
+| Kernel | `gcarno/eda-s6e8` |
+| Data (kernel) | `/kaggle/input/competitions/playground-series-s6e8/` |
+| Data (local) | `data/` — gitignored; `kaggle competitions download -c playground-series-s6e8 -p data` |
+
+## The frozen CV split
+
+```python
+StratifiedKFold(n_splits=5, shuffle=True, random_state=42)   # stratified on addicted_label
+```
+
+**Frozen for the entire competition.** Every `oof_proba_*.csv` under `experiments/preds/` is aligned
+to this split and to the row order of `train.csv`, which is what makes OOF matrices from runs weeks
+apart directly blendable. Do not change `n_splits`, `shuffle`, or `random_state` — not for a "quick
+test", not for a new learner.
+
+Seed-bagging *inside* a fold (averaging several model seeds per fold) is fine and was a real gain in
+S6E7. Re-running the whole stack at a different *split* seed was not (§5) — it is a probe, not a
+default, and it never changes the numbers above.
+
+## Metric discipline
+
+`sklearn.metrics.roc_auc_score` is the objective **everywhere**: CV scoring, any future Optuna
+objective, and any neural early-stopping. Not accuracy, not logloss as a silent proxy.
+
+Two consequences specific to AUC, which differ from S6E7's balanced accuracy:
+
+- **AUC is rank-based, so there is no decision threshold and no per-class weight to tune.** Submit
+  raw probabilities. Any monotone transform of the scores leaves the metric unchanged — so
+  probability *calibration* cannot help the leaderboard, only ranking can.
+- Class imbalance is mild (71/29) and `scale_pos_weight` / class weighting does not change the
+  ranking much. Treat it as a probe with a pre-registered gate, never as a default.
+
+## Leakage discipline
+
+The load-bearing constraint (§2). Target encoders, quantile bin edges, scalers, imputers and
+category vocabularies are:
+
+- **fit on the training fold only**, applied to the val/test fold;
+- **re-fit at every usage site** — feature selection, HPO, and the final stack each get their own fit,
+  never one global fit before the CV loop;
+- unseen categories at inference map to a reserved "unknown" level, never raise.
+
+An *unsupervised* label mapping (ordinal-coding a category vocabulary over train ∪ test) is not a
+leak, because it never touches `y`. A *supervised* one (target/count encoding) is. When the
+distinction is non-obvious in code, say which one it is in a comment.
+
+## Pre-registered improvement gate
+
+**TBD — deliberately unset.**
+
+§4 says the gate should be ≈1σ of the measured OOF↔LB residual, and that number does not exist until
+there are ~10 runs with both an OOF and an LB score. Do not invent a gate before there is data behind
+it. Once `experiments/runs.csv` has enough paired rows, compute Spearman(OOF, LB) and the residual σ,
+write the gate here, and hold every subsequent probe to it.
+
+## Experiment log
+
+`experiments/runs.csv` is append-only and tracked in git — one row per run, with a long free-text
+`notes` column (the single most valuable column in S6E7). `experiments/preds/<run_id>/` holds that
+run's `submission.csv`, `oof_proba_*.csv`, `test_proba_*.csv`; it is gitignored but never deleted.
+
+Runs are collected with:
+
+```
+python scripts/collect_run.py --submit --description "..." --notes "..."
+```
+
+which pushes the kernel, polls to completion, parses the `RUN_METRICS_JSON:` line from the kernel
+log, archives the artifacts, optionally submits, and appends the row.

@@ -1,0 +1,18 @@
+# local copy of the competition data (re-downloadable: kaggle competitions download -c playground-series-s6e8 -p data --unzip)
+data/
+# kaggle kernels output scratch
+.kaggle_output/
+__pycache__/
+*.pyc
+# per-run prediction artifacts (large CSVs; runs.csv stays tracked)
+experiments/preds/
+experiments/blends/
+# harvested public submission/artifact bank (large, not ours to redistribute)
+experiments/bank/
+# single-model file submissions built from per-learner proba artifacts
+experiments/singles/
+# auto-submit queue state + logs (reference gitignored local CSVs; runs.csv stays tracked)
+experiments/queue.json
+experiments/submit_log.csv
+experiments/.submit_queue.lock
+logs/
