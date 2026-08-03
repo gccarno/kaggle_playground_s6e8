@@ -89,17 +89,33 @@ there are enough pairs, and re-judge any probe that cleared it by less than the 
 "distinguishable" by that test — two seeds genuinely are two different models — and it is still pure
 noise for decision-making, because another seed would move it again. Only the gate decides shipping.
 
-### Early OOF↔LB signal (n=2 — not yet a measurement)
+### OOF↔LB calibration (n=5) — and its one known limit
 
-| run | OOF | LB | LB − OOF |
-|---|---|---|---|
-| `ba6c676a` | 0.963320 | 0.96500 | +0.001680 |
-| `22de9888` | 0.963254 | 0.96491 | +0.001656 |
+| run | tag | OOF | LB | offset |
+|---|---|---|---|---|
+| `ba6c676a` | anchor | 0.963320 | 0.96500 | +0.001680 |
+| `22de9888` | seed twin | 0.963254 | 0.96491 | +0.001656 |
+| `66e3dede` | B1 interaction | 0.963047 | 0.96478 | +0.001733 |
+| `6b671f87` | champion @ES400 | 0.963405 | 0.96521 | +0.001805 |
+| `f64e2781` | **B6 target encoding** | **0.966384** | **0.96788** | **+0.001496** |
 
-The offset is positive and so far strikingly stable (the two differ by 0.000024). Positive is the
-expected direction: an OOF model sees 4/5 of the data while the submission averages all 5 fold-models.
-Two points prove nothing — but if this holds, OOF will be a reliable proxy and §4's licence to stop
-submitting arrives early.
+Spearman(OOF, LB) = **+1.000** across all five. Offset is positive because an OOF model sees 4/5 of
+the data while the submission averages all 5 fold-models.
+
+**The offset is NOT model-family invariant.** The four non-TE runs sit at +0.001719 ± 0.000066. B6
+came in at +0.001496 — **3.37σ low**. Before submitting B6 I pre-registered a predicted LB of
+0.96810 ± 0.0002 from this calibration; it landed at 0.96788, outside the band and in the direction
+that target-encoding optimism predicts (the val-fold encoding is built on 4/5 of train, so OOF
+benefits marginally more than test does).
+
+Consequences, which bind on every later decision:
+
+- **Within a model family, the gate stands.** Every probe is a strict twin, so this is the usual case.
+- **Across families, do not compare OOF at gate resolution.** A TE model needs ≈0.0002 subtracted
+  from its OOF before being compared with a non-TE model. Blend weights fitted on OOF across families
+  inherit the same bias.
+- The 0.0002 family offset is itself estimated from a single TE run. Treat it as an order of
+  magnitude, not a constant, and re-estimate as more TE runs land.
 
 ## Experiment log
 

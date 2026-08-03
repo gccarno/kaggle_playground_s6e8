@@ -43,8 +43,13 @@ RUN_COLUMNS = [
 ]
 
 # Metrics keys copied straight through to same-named columns when present.
+# best_iters and fold_aucs are list-valued and get joined into a string: they are the
+# columns that exposed B1's early-stopping confound (fold 0 quitting at 1055 vs 3000
+# while the other folds were flat), and that diagnostic was only visible in scrollback
+# at the time. Anything capable of overturning a probe's verdict belongs in the log.
 PASSTHROUGH = ["notebook_runtime_sec", "n_features", "n_folds", "cv_seed",
-               "fold_auc_mean", "fold_auc_std", "final_oof_auc"]
+               "fold_auc_mean", "fold_auc_std", "final_oof_auc",
+               "best_iters", "fold_aucs", "model_seed"]
 
 # Artifacts to archive per run, in addition to anything matching PRED_GLOBS.
 PRED_FILES = ["submission.csv"]
@@ -236,7 +241,8 @@ def build_row(metrics, **fixed):
     row = dict(fixed)
     for k in PASSTHROUGH:
         if k in metrics:
-            row[k] = metrics[k]
+            v = metrics[k]
+            row[k] = " ".join(str(x) for x in v) if isinstance(v, list) else v
     # Per-learner OOF scores. The notebook emits "<learner>_oof_auc" keys directly;
     # any learner name is accepted and gets its own column.
     for k, v in metrics.items():

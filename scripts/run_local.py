@@ -27,10 +27,14 @@ _spec = importlib.util.spec_from_file_location("collect_run", Path(__file__).wit
 cr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cr)
 
+# MUST mirror DEFAULTS in s6e8-model.ipynb -- the notebook asserts it receives no
+# unknown keys, and --diff-vs compares against these values, so a stale copy here
+# silently makes "strict twin" checks compare against the wrong baseline.
 DEFAULTS = {
     "run_tag": "champion", "learner": "lgb", "model_seed": 42,
     "fe_interaction": False, "fe_composition": False, "fe_normalization": False,
-    "drop_flat_cats": False, "lgb_params": {}, "n_estimators": 8000, "early_stop": 100,
+    "drop_flat_cats": False, "te_cols": [], "te_smooth": 20.0, "te_inner_folds": 5,
+    "lgb_params": {}, "n_estimators": 8000, "early_stop": 400,
 }
 
 
@@ -56,39 +60,40 @@ def check_strict_twin(cfg, baseline):
 
 
 def execute_notebook(cfg, out_dir):
-    """Execute the notebook in-process via nbclient, streaming stdout as it goes."""
-    import nbformat
-    from nbclient import NotebookClient
+    """Run the notebook's code cells as a script in a child process, streaming output live.
 
-    env = dict(os.environ, S6E8_CFG=json.dumps(cfg), S6E8_OUT=str(out_dir))
-    nb = nbformat.read(NOTEBOOK, as_version=4)
-    client = NotebookClient(nb, timeout=7200, kernel_name="python3",
-                            resources={"metadata": {"path": str(REPO_ROOT)}})
-    # nbclient inherits the parent env, so set it here for the duration of the run.
-    old = {k: os.environ.get(k) for k in ("S6E8_CFG", "S6E8_OUT")}
-    os.environ.update(S6E8_CFG=env["S6E8_CFG"], S6E8_OUT=env["S6E8_OUT"])
-    try:
-        client.execute()
-    finally:
-        for k, v in old.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
+    Deliberately NOT nbclient: it buffers all cell output until execute() returns, so a
+    run that is interrupted (or merely slow) shows nothing at all -- three runs were lost
+    that way with zero diagnostic trace. The notebook stays the single source of truth;
+    only its code cells are extracted, in order, and run in one namespace, which is what
+    a notebook is anyway."""
+    nb = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+    parts = ["import matplotlib\nmatplotlib.use('Agg')\n"]
+    for i, c in enumerate(nb["cells"]):
+        if c["cell_type"] == "code":
+            parts.append(f"\n# ---- cell {i} ----\n" + "".join(c["source"]) + "\n")
 
-    text = "".join(
-        "".join(o.get("text", "") for o in c.get("outputs", []) if o.get("output_type") == "stream")
-        for c in nb.cells if c.cell_type == "code")
-    print(text)
-    for c in nb.cells:
-        for o in c.get("outputs", []):
-            if o.get("output_type") == "error":
-                raise RuntimeError(f"notebook cell failed: {o['ename']}: {o['evalue']}\n"
-                                   + "\n".join(o.get("traceback", [])[-8:]))
+    script = REPO_ROOT / ".kaggle_output" / f"_run_{out_dir.name}.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("".join(parts), encoding="utf-8")
+
+    env = dict(os.environ, S6E8_CFG=json.dumps(cfg), S6E8_OUT=str(out_dir),
+               PYTHONUNBUFFERED="1")
+    proc = subprocess.Popen([sys.executable, "-u", str(script)], cwd=REPO_ROOT, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            bufsize=1)
+    captured = []
+    for line in proc.stdout:          # live: every line appears as it is produced
+        print(line, end="", flush=True)
+        captured.append(line)
+    if proc.wait() != 0:
+        raise RuntimeError(f"notebook script failed with exit code {proc.returncode}")
+
     marker = "RUN_METRICS_JSON:"
-    line = next((l for l in text.splitlines() if l.startswith(marker)), None)
+    line = next((l for l in captured if l.startswith(marker)), None)
     if line is None:
         raise RuntimeError("RUN_METRICS_JSON not found in notebook output")
+    script.unlink(missing_ok=True)
     return json.loads(line[len(marker):])
 
 
