@@ -71,13 +71,29 @@ def git_dirty():
     return bool(out.stdout.strip())
 
 
-def kernel_ref():
-    meta = json.loads(KERNEL_METADATA.read_text(encoding="utf-8"))
+def kernel_ref(metadata=None):
+    meta = json.loads((metadata or KERNEL_METADATA).read_text(encoding="utf-8"))
     return meta["id"]
 
 
-def push_kernel():
-    out = run(["kaggle", "kernels", "push", "-p", str(REPO_ROOT)])
+def stage_push_dir(metadata):
+    """`kaggle kernels push -p DIR` only ever reads DIR/kernel-metadata.json, so a repo
+    holding two kernels cannot push the second one in place. Stage a throwaway directory
+    containing just that kernel's metadata (under the required name) plus its notebook,
+    rather than mutating the repo's own kernel-metadata.json and risking leaving it
+    swapped if the push fails."""
+    meta = json.loads(metadata.read_text(encoding="utf-8"))
+    staged = REPO_ROOT / ".kaggle_output" / f"_push_{meta['id'].split('/')[-1]}"
+    staged.mkdir(parents=True, exist_ok=True)
+    (staged / "kernel-metadata.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
+    shutil.copy2(REPO_ROOT / meta["code_file"], staged / meta["code_file"])
+    print(f"  staged {meta['id']} ({meta['code_file']}) -> {staged}")
+    return staged
+
+
+def push_kernel(metadata=None):
+    push_dir = stage_push_dir(metadata) if metadata else REPO_ROOT
+    out = run(["kaggle", "kernels", "push", "-p", str(push_dir)])
     print(out.stdout); print(out.stderr, file=sys.stderr)
     if out.returncode != 0:
         raise RuntimeError(f"kaggle kernels push failed: {out.stderr}")
@@ -257,12 +273,16 @@ def main():
     ap.add_argument("--no-push", action="store_true", help="Skip pushing; poll an already-running kernel")
     ap.add_argument("--submit", action="store_true", help="Also submit submission.csv to the leaderboard")
     ap.add_argument("--competition", default=COMPETITION)
+    ap.add_argument("--metadata", default=None,
+                    help="kernel metadata json (default kernel-metadata.json); "
+                         "use kernel-metadata-model.json for the modelling kernel")
     ap.add_argument("--poll-interval", type=int, default=60, help="Seconds between status checks")
     ap.add_argument("--timeout-min", type=int, default=180, help="Max minutes to wait for completion")
     ap.add_argument("--notes", default="", help="Freeform notes column -- hypothesis, mechanism, gate")
     args = ap.parse_args()
 
-    ref = kernel_ref()
+    metadata = (REPO_ROOT / args.metadata) if args.metadata else None
+    ref = kernel_ref(metadata)
     commit = git_commit()
     dirty = git_dirty()
     if dirty:
@@ -270,7 +290,7 @@ def main():
 
     version = None
     if not args.no_push:
-        version = push_kernel()
+        version = push_kernel(metadata)
         print(f"Pushed. Detected version: {version!r} (best-effort parse; may be None)")
 
     print(f"Polling {ref} for completion...")
