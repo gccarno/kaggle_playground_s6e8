@@ -120,6 +120,26 @@ spanning 0.00036 of OOF was too small (0.000064) and too confident; over a 3× w
 not promote a single outlier to a structural finding.** This is the same error the playbook warns
 about for public-LB scores, committed against our own metric.
 
+## Strength vs decorrelation (§6) — first measurements
+
+The playbook's central late-competition test: for a blend to improve, a leg must be both *strong solo*
+and *decorrelated* from the champion's other legs. In S6E7 those two were strongly anti-correlated
+(Spearman −0.84), which is what closes the ensemble axis. First three points here, all against the
+XGBoost leg, with the seed-noise disagreement floor at 1.450%:
+
+| leg | solo OOF | disagreement vs XGB |
+|---|---|---|
+| B6 LightGBM (lr 0.05) | 0.966384 | **1.931%** |
+| C1 LightGBM (lr 0.02) | 0.966604 | **1.843%** |
+
+Already the expected direction: **the stronger leg is the more correlated one.** C1 beat B6 solo by
++0.000220 (clearing the gate) yet moved the blend only +0.000073 (missing it), because most of the
+solo gain was cancelled by lost diversity.
+
+**Operational consequence:** when the champion is a blend, a leg clearing the gate is *not* grounds to
+ship. Re-derive the blend and judge it on nested-CV held-out AUC. Runs `6a091632` (leg cleared) and
+`4886aef5` (blend did not) are the worked example.
+
 ## Experiment log
 
 `experiments/runs.csv` is append-only and tracked in git — one row per run, with a long free-text
