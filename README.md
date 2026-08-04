@@ -175,6 +175,30 @@ flat or negative. Two structural facts fall out:
 So more LightGBM tuning cannot open the ensemble axis — only a different family can. That is what
 run `D1` (CatBoost) tests, and it is the *reason* it is worth a kernel cycle.
 
+## A knob that improves the instrument without improving the score
+
+Run `5daf6c12` (C2) raised the target encoder's inner folds 5 → 20. Its pre-registered mechanism
+prediction was that `best_iter` should *rise*, because training rows would be fed a cleaner version of
+the feature. Both predicted effects landed, and the score did not:
+
+| | B6 (5 inner folds) | C2 (20 inner folds) |
+|---|---|---|
+| OOF AUC | 0.966384 | 0.966446 (**+0.000062 — misses the gate**) |
+| mean `best_iter` | 1860 | 2286 |
+| sd of `best_iter` | 462 | **148** |
+| range of `best_iter` | 1453 | **382** |
+
+The mismatch it targets is real: training rows are encoded from an inner fit on 80% of the fold, val
+and test rows from a fit on 100% of it. Closing that gap to 95% demonstrably cleans the feature —
+23% more trees before overfitting — but buys **+0.000062, at the seed-noise floor of 0.000066**. So
+the mismatch was never costing much score at 5 folds.
+
+**The useful result is the third row.** Early-stopping scatter is what wrecked probe B1's
+interpretation, where one fold's `best_iter` collapsed 3000 → 1055 and produced ~0.001 of per-fold
+movement against a 0.0002 gate. C2 cuts that scatter by a factor of three. It is worth adopting as a
+default **as a measurement-noise reduction, not as a score claim** — the distinction matters, and the
+gate correctly rejects it on score.
+
 ## Experiment log
 
 `experiments/runs.csv` is append-only and tracked in git — one row per run, with a long free-text
