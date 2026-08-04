@@ -352,6 +352,26 @@ disagreement than E1. Confirmed — and it set the record:
 The two MLPs disagree with *each other* more than E1 disagrees with CatBoost. The representation
 really did change. **Blend Δ: +0.000137 — miss.**
 
+## E3 — decorrelation that is pure weakness
+
+Every leg up to this point used the **identical** B6 target-encoded feature set, so feature
+representation had been held constant across the whole portfolio. E3 is the same MLP on **raw
+features, no target encoding**:
+
+| | solo OOF | disagreement vs trees | blend Δ |
+|---|---|---|---|
+| E1 MLP (TE features) | 0.965935 | 2.827–3.165% | +0.000254 → shipped |
+| **E3 MLP (raw features)** | **0.940496** | **10.165%** | **−0.000647** |
+
+Target encoding is worth ~0.025 to a neural net, against ~0.003 to a tree — the net has no mechanism
+for learning a non-monotone value→rate lookup from a raw column, which is the same structural fact
+that drove B6 and D2.
+
+E3 triples the decorrelation record and **damages the blend at every weight tried** (1, ½, ¼ — all
+negative). This is §6's second warning measured on our own data: *"high disagreement is usually
+weakness, not diversity — the disagreement was the model being wrong in new places."* Disagreement is
+necessary and nowhere near sufficient.
+
 ## The wall (§6)
 
 | | |
@@ -377,6 +397,29 @@ S6E7's number. The "everything" blend confirms §5 from the other side: eleven l
 Monotonically decreasing, and the last three miss despite one of them being the strongest solo leg
 ever built here and another holding the decorrelation record. Both jaws of §6's wall, in consecutive
 probes.
+
+### How far that claim actually reaches — a correction
+
+The −0.645 was computed over 11 legs that are **three tree libraries plus one MLP shape, every one of
+them on the same target-encoded feature set**. Architecture varied; representation did not; and the
+neural side was a single design. S6E7's −0.84 came from 38 learners spanning genuinely different
+architectures. **Describing that measurement as "the wall" overstated it** — the defensible claim is
+that *the tree axis plus one MLP shape* is exhausted, which is a much narrower statement.
+
+Being explicit about what has **not** been tried, since the gap is the point:
+
+| architecture | status |
+|---|---|
+| RealMLP (pytabkit) | implemented, running — PLR numeric embeddings, own scaling pipeline and schedule |
+| FT-Transformer (rtdl) | implemented, queued |
+| TabTransformer | implemented, queued |
+| NODE | not implemented — no maintained package, would be from scratch |
+| TabICL | **not applicable**: in-context learning needs the training set as context and targets thousands of rows, not 691k. A subsampled context makes it E3's failure mode by construction — weak, and decorrelated for the wrong reason |
+
+E3 already complicates the picture in both directions: varying the feature set *does* produce
+decorrelation far beyond anything architecture variation reached (10.2% vs 3.4%), and that
+decorrelation was worthless. So the wall may well be real — but it had not been tested where it
+mattered when the claim was made.
 
 The closest miss, `B6+C4x+D1cat+E1mlp+E2emb` at +0.000183, is **not** being shipped. It is 0.9× the
 gate, the gate was pre-registered, and moving it now to admit the run that just missed it is precisely
