@@ -89,7 +89,7 @@ there are enough pairs, and re-judge any probe that cleared it by less than the 
 "distinguishable" by that test — two seeds genuinely are two different models — and it is still pure
 noise for decision-making, because another seed would move it again. Only the gate decides shipping.
 
-### OOF↔LB calibration (n=8)
+### OOF↔LB calibration (n=9)
 
 | run | tag | OOF | LB | offset |
 |---|---|---|---|---|
@@ -100,12 +100,20 @@ noise for decision-making, because another seed would move it again. Only the ga
 | `f64e2781` | B6 target encoding | 0.966384 | 0.96788 | +0.001496 |
 | `6e3dd7c3` | B7 TE cross | 0.966353 | 0.96806 | +0.001707 |
 | `9e68c7ce` | B8 num_leaves 255 | 0.966135 | 0.96781 | +0.001675 |
+| `6a091632` | C1 lr 0.02 | 0.966604 | 0.96802 | +0.001416 |
 | **`b171c0cf`** | **blend (champion)** | **0.966902** | **0.96831** | +0.001408 |
 
-**offset +0.001645 ± 0.000130, Spearman(OOF, LB) = +0.976, residual σ = 0.000096.**
+**offset +0.001620 ± 0.000143, Spearman(OOF, LB) = +0.950, residual σ = 0.000107.**
 
-Gate stays **+0.0002** ≈ 2σ. Offset is positive because an OOF model sees 4/5 of the data while a
-submission averages all 5 fold-models.
+Gate stays **+0.0002** ≈ 1.9σ of the residual. Offset is positive because an OOF model sees 4/5 of the
+data while a submission averages all 5 fold-models.
+
+**The first rank inversion, at n=9.** C1 beat B7 on OOF (0.966604 vs 0.966353, +0.000251) and *lost*
+to it on LB (0.96802 vs 0.96806). That is why Spearman fell from 0.976 to 0.950 — not a worse
+calibration, a more honest one, because the first eight runs never contained two models close enough
+to test the ordering. Read it as the intended warning: **at ΔOOF ≈ 0.00025 the two metrics do not
+reliably agree on which model is better**, so a probe clearing the gate by a hair is not a decision.
+This argues the gate should move *up* when §4's ~10 pairs land, not down.
 
 #### A retracted claim, kept on purpose
 
@@ -139,6 +147,33 @@ solo gain was cancelled by lost diversity.
 **Operational consequence:** when the champion is a blend, a leg clearing the gate is *not* grounds to
 ship. Re-derive the blend and judge it on nested-CV held-out AUC. Runs `6a091632` (leg cleared) and
 `4886aef5` (blend did not) are the worked example.
+
+### The existing ensemble space is exhausted
+
+Screened offline from archived OOF artifacts — **all 10 pairs and 10 triples** over the five legs
+(B6, B7, B8 LightGBM; B10 XGBoost; C1 LightGBM lr 0.02), each scored by the same nested protocol
+`make_blend.py` uses (ratio chosen on 4 folds, applied to the held-out 5th, pooled). Champion
+`B6+B10x` = 0.966895.
+
+| blend | nested-CV held-out | vs champion | mean disagreement |
+|---|---|---|---|
+| B7+B10x+C1 | 0.967022 | +0.000127 | 1.829% |
+| B7+B8+B10x | 0.967014 | +0.000119 | 2.129% |
+| B6+B7+B10x | 0.966999 | +0.000104 | 1.894% |
+| … 16 more … | | | |
+| B6+C1 | 0.966641 | −0.000254 | 0.975% |
+
+**Nothing clears +0.0002.** The best of twenty candidates reaches +0.000127, and the sixteen worst are
+flat or negative. Two structural facts fall out:
+
+- **Every blend that contains the XGBoost leg beats every blend that does not.** B10x supplies all the
+  diversity; the LightGBM legs are near-substitutes for one another (B6+C1 disagree on 0.975%, below
+  the 1.450% seed floor — two *different configs* that agree more than one config at two seeds).
+- **Disagreement alone does not buy score.** B8+B10x is the most decorrelated pair on the board at
+  2.222% and lands at −0.000002, because B8 is the weakest leg solo. Both halves of §6 are required.
+
+So more LightGBM tuning cannot open the ensemble axis — only a different family can. That is what
+run `D1` (CatBoost) tests, and it is the *reason* it is worth a kernel cycle.
 
 ## Experiment log
 
