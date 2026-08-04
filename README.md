@@ -102,9 +102,10 @@ noise for decision-making, because another seed would move it again. Only the ga
 | `9e68c7ce` | B8 num_leaves 255 | 0.966135 | 0.96781 | +0.001675 |
 | `6a091632` | C1 lr 0.02 | 0.966604 | 0.96802 | +0.001416 |
 | `b171c0cf` | blend, 2 legs | 0.966902 | 0.96831 | +0.001408 |
-| **`9e165a90`** | **blend, 3 families (champion)** | **0.967197** | **0.96847** | +0.001273 |
+| `9e165a90` | blend, 3 families | 0.967197 | 0.96847 | +0.001273 |
+| **`facfe8de`** | **blend, 4 families (champion)** | **0.967451** | **0.96865** | +0.001199 |
 
-**offset +0.001585 ± 0.000174, Spearman(OOF, LB) = +0.964, residual σ = 0.000121.**
+**Spearman(OOF, LB) = +0.973, residual σ = 0.000131.**
 
 §4's ~10 paired runs now exist, so the gate stops being provisional. **The gate stays at +0.0002**,
 which is 1.65σ of the measured residual rather than the 1σ §4 suggests as a floor — because the n=9
@@ -119,18 +120,22 @@ The two blends carry the two smallest offsets on the board, and the ranges do no
 | | n | mean offset | range |
 |---|---|---|---|
 | single models | 8 | +0.001646 | +0.001416 … +0.001805 |
-| blends | 2 | +0.001341 | +0.001273 … +0.001408 |
+| blends | 3 | +0.001293 | +0.001199 … +0.001408 |
 
-Consistent with it, the champion blend's OOF gain of +0.000295 converted to only +0.00016 on the LB.
-A mechanism is available — part of what blending cancels is *OOF-specific* noise, which has nothing to
-cancel on the test set — and if it is real, **blend OOF gains should be discounted before being
-compared to the gate.**
+Consistent with it, the 3-family blend's OOF gain of +0.000295 converted to +0.00016 on the LB, and
+the 4-family blend's +0.000254 converted to +0.00018. A mechanism is available — part of what blending
+cancels is *OOF-specific* noise, which has nothing to cancel on the test set — and if it is real,
+**blend OOF gains should be discounted before being compared to the gate.**
 
-**This is recorded as a hypothesis and is not being acted on.** The near-identical claim about
-target-encoded models was made at n=1 earlier in this file and refuted by the next run; n=2 is not
-meaningfully better. Falsification test, pre-registered: the next three blends' offsets. If any lands
-above +0.001416 (the lowest single-model offset), the separation is noise and this subsection gets
-struck, like the last one.
+**Still a hypothesis, still not being acted on.** The near-identical claim about target-encoded models
+was made at n=1 earlier in this file and refuted by the next run.
+
+**Falsification test, first of three: SURVIVED.** The pre-registered rule was that any blend landing
+above +0.001416 (the lowest single-model offset) strikes this subsection. `facfe8de` landed at
++0.001199 — below the range, and the lowest offset yet. Two more blends to go before this graduates
+from hypothesis to finding. Note also that the blend offsets are *monotonically decreasing* with the
+number of legs (2 legs +0.001408, 3 +0.001273, 4 +0.001199), which the noise explanation does not
+predict — but three points and an ordering is exactly the kind of pattern that fooled the last claim.
 
 **The first rank inversion, at n=9.** C1 beat B7 on OOF (0.966604 vs 0.966353, +0.000251) and *lost*
 to it on LB (0.96802 vs 0.96806). That is why Spearman fell from 0.976 to 0.950 — not a worse
@@ -222,6 +227,32 @@ noise, so taking the argmax would be precisely the §5 selection bias. The shipp
 a **rule stated before looking**: add the new family to the existing champion, one leg per family,
 equal weights (which fit nothing at all). Result `9e165a90`: +0.000295 full-OOF, positive on all five
 folds within +0.000276…+0.000331, **LB 0.96831 → 0.96847**.
+
+### E1 MLP — decorrelation without strength, and it still pays
+
+A fourth family (`2fb89920`), PyTorch, GPU, ~6 minutes. It is the **weakest leg on the board solo**
+and by far the **most decorrelated**:
+
+| leg | solo OOF | disagreement vs XGB |
+|---|---|---|
+| E1 MLP | **0.965935** (weakest) | **3.165%** (highest) |
+| D1 CatBoost | 0.966890 (strongest) | 2.063% |
+| B6 LightGBM | 0.966384 | 1.931% |
+
+Both halves were pre-registered: disagreement above D1's 2.063%, solo *below* the trees, judged on the
+blend and not on solo. A neural net shares no inductive bias with a tree — smooth global function
+versus axis-aligned partition — and the 2.8–3.2% spread against every tree leg is that showing up in
+the predictions. It is also the first model here that needs scaling and imputation, both fit on the
+training fold only, under the same rule as the target encoder.
+
+Shipped by the same stated rule: `facfe8de`, four families at equal weight, +0.000254 full-OOF,
+positive on all five folds (+0.000197…+0.000307), **LB 0.96847 → 0.96865**. Again not the argmax —
+dropping B6 scored marginally higher and was not taken.
+
+**This is the clearest statement of §6 in the whole competition.** B8 was decorrelated but weak and
+its blend was worth −0.000002. C1 was strong but correlated and its blend was worth +0.000073. The MLP
+is *extremely* decorrelated and merely adequate, and it pays. Decorrelation is the scarce quantity
+here; solo strength is not.
 
 ## The unsupervised categorical lever is closed (D2, D2b)
 
