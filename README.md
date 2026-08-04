@@ -310,6 +310,78 @@ movement against a 0.0002 gate. C2 cuts that scatter by a factor of three. It is
 default **as a measurement-noise reduction, not as a score claim** — the distinction matters, and the
 gate correctly rejects it on score.
 
+## Hyperparameter tuning (C4) — the biggest solo win since target encoding, worth nothing
+
+Optuna, 30 trials, 250k stratified subsample, 3-fold, ROC AUC objective, **on the local GPU** — the
+target encoder re-fit inside every fold of every trial, because §2 names HPO as a usage site. XGBoost
+was the target: the blend screen showed it is load-bearing, and it was the least-tuned leg.
+
+The search itself looked weak — span 0.963503…0.964603, best only +0.000184 over trial 0, and it
+returned `max_depth: 6`, our existing default, independently reproducing C3's finding that depth is
+not the lever. On the frozen 5-fold it was anything but weak:
+
+| | solo OOF | vs B10x | blend Δ vs champion |
+|---|---|---|---|
+| B10x XGBoost (untuned) | 0.966632 | — | — |
+| **C4 XGBoost (Optuna)** | **0.967176** | **+0.000544** | **+0.000068 — miss** |
+
+**+0.000544 solo, 2.7× the gate, the largest single-leg gain since target encoding — and the blend
+moves +0.000068.** `best_iter` roughly doubled (901 → 2008), which is the subsample/colsample
+regularisation buying depth of fitting. Swapping it in, keeping both XGBoost legs, and a five-leg
+variant were all tried: +0.000068, +0.000085, +0.000183. **None clears. Nothing shipped.**
+
+This is C1's lesson again and much sharper, because the solo gain is 2.5× larger and the blend gain is
+smaller. What the blend already had, it already had.
+
+*Protocol caveat, stated because it cuts against the result being even better:* the search subsample
+overlaps the frozen OOF rows, so the search score is optimistic. Only the frozen 5-fold run counts,
+which is the number above.
+
+## E2 — a decorrelation record that buys nothing
+
+The regularised answer to D2. A tree *split* on a 166/231-level lookup column overfits; an
+**embedding** is the same per-value lookup fitted under weight decay. Mechanism prediction: higher
+disagreement than E1. Confirmed — and it set the record:
+
+| pair | disagreement |
+|---|---|
+| E2 vs XGBoost | **3.352%** (highest measured) |
+| E2 vs E1 MLP | 2.990% |
+| E1 vs CatBoost | 2.827% |
+
+The two MLPs disagree with *each other* more than E1 disagrees with CatBoost. The representation
+really did change. **Blend Δ: +0.000137 — miss.**
+
+## The wall (§6)
+
+| | |
+|---|---|
+| **Spearman(strength, decorrelation), 11 legs** | **−0.645, p = 0.032** |
+| S6E7 at the closed wall | −0.84 over 38 learners |
+| all 11 legs, equal weight | 0.967507 — **+0.000056** vs the 4-leg champion |
+
+Earlier in this session the same test gave −0.583 at p=0.099. It is now significant and heading toward
+S6E7's number. The "everything" blend confirms §5 from the other side: eleven legs beat four by
++0.000056, which is nothing.
+
+**The §8 signal is the sequence, not any single probe:**
+
+| probe | blend Δ | |
+|---|---|---|
+| D1 CatBoost → 3 families | +0.000295 | shipped, LB 0.96847 |
+| E1 MLP → 4 families | +0.000254 | shipped, LB 0.96865 |
+| E2 embedding MLP | +0.000137 | miss |
+| C4 + E2 together | +0.000183 | miss |
+| C4 Optuna XGBoost | +0.000068 | miss |
+
+Monotonically decreasing, and the last three miss despite one of them being the strongest solo leg
+ever built here and another holding the decorrelation record. Both jaws of §6's wall, in consecutive
+probes.
+
+The closest miss, `B6+C4x+D1cat+E1mlp+E2emb` at +0.000183, is **not** being shipped. It is 0.9× the
+gate, the gate was pre-registered, and moving it now to admit the run that just missed it is precisely
+what a pre-registered gate exists to prevent.
+
 ## Experiment log
 
 `experiments/runs.csv` is append-only and tracked in git — one row per run, with a long free-text
