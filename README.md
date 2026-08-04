@@ -223,6 +223,38 @@ a **rule stated before looking**: add the new family to the existing champion, o
 equal weights (which fit nothing at all). Result `9e165a90`: +0.000295 full-OOF, positive on all five
 folds within +0.000276…+0.000331, **LB 0.96831 → 0.96847**.
 
+## The unsupervised categorical lever is closed (D2, D2b)
+
+The EDA's central finding was that `notifications_per_day` is a **lookup table, not a function** —
+per-value positive rates spanning 0.119…0.986 with Pearson(value, rate) = −0.044 and only 47.8% of
+consecutive steps increasing. That explains its 0.492 solo AUC alongside its 1st place in split usage,
+and it is why B1's ratio feature failed: a ratio is a monotone transform and cannot represent a lookup.
+
+If values are labels rather than magnitudes, declaring them **categorical** is the unsupervised lever
+on that structure. Both scopes were tried and both lost badly:
+
+| run | scope | OOF | vs B6 | mean `best_iter` |
+|---|---|---|---|---|
+| B6 | numerics stay numeric | 0.966384 | — | 1860 |
+| `D2` | all 9 numerics categorical | 0.962343 | **−0.004041** | 450 |
+| `D2b` | only the 2 lookup columns | 0.964549 | **−0.001835** | 503 |
+
+D2's failure had an obvious diagnosis, and acting on it was still wrong. Seven of the nine columns are
+strongly **monotone** — `daily_screen_time_hours` scores 0.8896 solo across 1389 levels,
+`weekend_screen_time` 0.8810 across 1437 — so categorifying them discards real ordinal signal *and*
+hands LightGBM a 1400-level feature to overfit. D2b therefore restricted the treatment to the only two
+columns the lookup-table property was ever measured on, and **pre-registered the prediction that
+`best_iter` would recover to ~1800**. It did not: 503. The prediction failed and the score agreed.
+
+**Mechanism:** LightGBM's categorical splitter sorts levels by their per-level gradient statistics on
+the training fold and cuts — that *is* target encoding, fitted with no nesting and no smoothing. At
+166 and 231 levels it overfits, which is exactly what the collapsed `best_iter` reports. B6 already
+extracts this structure the safe way, with inner-OOF nesting and a smoothing prior, for +0.003. There
+was never room for both.
+
+The cheap LightGBM screen is the point: two runs, seven minutes, no submissions, and it retired a
+CatBoost variant that would have cost a multi-hour kernel cycle to reach the same answer.
+
 ## A knob that improves the instrument without improving the score
 
 Run `5daf6c12` (C2) raised the target encoder's inner folds 5 → 20. Its pre-registered mechanism
