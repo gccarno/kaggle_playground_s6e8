@@ -89,7 +89,7 @@ there are enough pairs, and re-judge any probe that cleared it by less than the 
 "distinguishable" by that test — two seeds genuinely are two different models — and it is still pure
 noise for decision-making, because another seed would move it again. Only the gate decides shipping.
 
-### OOF↔LB calibration (n=9)
+### OOF↔LB calibration (n=10)
 
 | run | tag | OOF | LB | offset |
 |---|---|---|---|---|
@@ -101,12 +101,36 @@ noise for decision-making, because another seed would move it again. Only the ga
 | `6e3dd7c3` | B7 TE cross | 0.966353 | 0.96806 | +0.001707 |
 | `9e68c7ce` | B8 num_leaves 255 | 0.966135 | 0.96781 | +0.001675 |
 | `6a091632` | C1 lr 0.02 | 0.966604 | 0.96802 | +0.001416 |
-| **`b171c0cf`** | **blend (champion)** | **0.966902** | **0.96831** | +0.001408 |
+| `b171c0cf` | blend, 2 legs | 0.966902 | 0.96831 | +0.001408 |
+| **`9e165a90`** | **blend, 3 families (champion)** | **0.967197** | **0.96847** | +0.001273 |
 
-**offset +0.001620 ± 0.000143, Spearman(OOF, LB) = +0.950, residual σ = 0.000107.**
+**offset +0.001585 ± 0.000174, Spearman(OOF, LB) = +0.964, residual σ = 0.000121.**
 
-Gate stays **+0.0002** ≈ 1.9σ of the residual. Offset is positive because an OOF model sees 4/5 of the
-data while a submission averages all 5 fold-models.
+§4's ~10 paired runs now exist, so the gate stops being provisional. **The gate stays at +0.0002**,
+which is 1.65σ of the measured residual rather than the 1σ §4 suggests as a floor — because the n=9
+rank inversion showed OOF and LB disagreeing on ordering at ΔOOF ≈ 0.00025, i.e. *above* 1σ. A 1σ gate
+would have shipped that inversion. Offset is positive because an OOF model sees 4/5 of the data while
+a submission averages all 5 fold-models.
+
+#### A hypothesis about blends, explicitly not a finding
+
+The two blends carry the two smallest offsets on the board, and the ranges do not overlap:
+
+| | n | mean offset | range |
+|---|---|---|---|
+| single models | 8 | +0.001646 | +0.001416 … +0.001805 |
+| blends | 2 | +0.001341 | +0.001273 … +0.001408 |
+
+Consistent with it, the champion blend's OOF gain of +0.000295 converted to only +0.00016 on the LB.
+A mechanism is available — part of what blending cancels is *OOF-specific* noise, which has nothing to
+cancel on the test set — and if it is real, **blend OOF gains should be discounted before being
+compared to the gate.**
+
+**This is recorded as a hypothesis and is not being acted on.** The near-identical claim about
+target-encoded models was made at n=1 earlier in this file and refuted by the next run; n=2 is not
+meaningfully better. Falsification test, pre-registered: the next three blends' offsets. If any lands
+above +0.001416 (the lowest single-model offset), the separation is noise and this subsection gets
+struck, like the last one.
 
 **The first rank inversion, at n=9.** C1 beat B7 on OOF (0.966604 vs 0.966353, +0.000251) and *lost*
 to it on LB (0.96802 vs 0.96806). That is why Spearman fell from 0.976 to 0.950 — not a worse
@@ -174,6 +198,30 @@ flat or negative. Two structural facts fall out:
 
 So more LightGBM tuning cannot open the ensemble axis — only a different family can. That is what
 run `D1` (CatBoost) tests, and it is the *reason* it is worth a kernel cycle.
+
+### D1 CatBoost — the first leg to break the tradeoff
+
+Run `7c1e9334`, 2.2 hours on a kernel (impossible locally), `best_iter` 3320–4552 against the 8000 cap.
+
+| leg | solo OOF | disagreement vs XGB |
+|---|---|---|
+| B6 LightGBM lr 0.05 | 0.966384 | 1.931% |
+| C3 XGBoost depth 8 | 0.966633 | 1.702% |
+| C1 LightGBM lr 0.02 | 0.966604 | 1.843% |
+| **D1 CatBoost** | **0.966890** | **2.063%** |
+
+**Strongest solo *and* most decorrelated.** Every previous leg traded one for the other; C1 bought
++0.000220 of strength at the cost of diversity and moved the blend +0.000073. The 2.063% threshold was
+written into the run's notes *before* it ran, as the condition for the family change to have meant
+anything.
+
+D1's solo OOF of 0.966890 alone nearly equals the entire two-leg champion **blend** (0.966902).
+
+All 25 CatBoost-containing blends cleared +0.0002, spanning +0.00027…+0.00038 — a spread that is
+noise, so taking the argmax would be precisely the §5 selection bias. The shipped blend was picked by
+a **rule stated before looking**: add the new family to the existing champion, one leg per family,
+equal weights (which fit nothing at all). Result `9e165a90`: +0.000295 full-OOF, positive on all five
+folds within +0.000276…+0.000331, **LB 0.96831 → 0.96847**.
 
 ## A knob that improves the instrument without improving the score
 
