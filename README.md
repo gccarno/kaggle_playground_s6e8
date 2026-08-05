@@ -89,7 +89,7 @@ there are enough pairs, and re-judge any probe that cleared it by less than the 
 "distinguishable" by that test — two seeds genuinely are two different models — and it is still pure
 noise for decision-making, because another seed would move it again. Only the gate decides shipping.
 
-### OOF↔LB calibration (n=12)
+### OOF↔LB calibration (n=13)
 
 | run | tag | OOF | LB | offset |
 |---|---|---|---|---|
@@ -104,9 +104,10 @@ noise for decision-making, because another seed would move it again. Only the ga
 | `b171c0cf` | blend, 2 legs | 0.966902 | 0.96831 | +0.001408 |
 | `9e165a90` | blend, 3 families | 0.967197 | 0.96847 | +0.001273 |
 | `facfe8de` | blend, 4 families | 0.967451 | 0.96865 | +0.001199 |
-| **`ffb65555`** | **nested-selected 5-leg (champion)** | **0.967733** | **0.96892** | +0.001187 |
+| **`ffb65555`** | **nested-selected 5-leg — FINAL A** | **0.967733** | **0.96892** | +0.001187 |
+| `2b54a858` | 13-leg no-selection — FINAL B | 0.967567 | 0.96873 | +0.001163 |
 
-**Spearman(OOF, LB) = +0.979, residual σ = 0.000133.**
+**Spearman(OOF, LB) = +0.984, residual σ = 0.000135.**
 
 §4's ~10 paired runs now exist, so the gate stops being provisional. **The gate stays at +0.0002**,
 which is 1.65σ of the measured residual rather than the 1σ §4 suggests as a floor — because the n=9
@@ -121,7 +122,7 @@ The two blends carry the two smallest offsets on the board, and the ranges do no
 | | n | mean offset | range |
 |---|---|---|---|
 | single models | 8 | +0.001646 | +0.001416 … +0.001805 |
-| blends | 4 | +0.001267 | +0.001187 … +0.001408 |
+| blends | 5 | +0.001246 | +0.001163 … +0.001408 |
 
 Consistent with it, the 3-family blend's OOF gain of +0.000295 converted to +0.00016 on the LB, and
 the 4-family blend's +0.000254 converted to +0.00018. A mechanism is available — part of what blending
@@ -131,14 +132,15 @@ cancels is *OOF-specific* noise, which has nothing to cancel on the test set —
 **Still a hypothesis, still not being acted on.** The near-identical claim about target-encoded models
 was made at n=1 earlier in this file and refuted by the next run.
 
-**Falsification tests, two of three: SURVIVED.** The pre-registered rule was that any blend landing
-above +0.001416 (the lowest single-model offset) strikes this subsection. `facfe8de` came in at
-+0.001199 and `ffb65555` at +0.001187 — both below the threshold, each the lowest yet. One more blend
-before this graduates from hypothesis to finding.
+**All three falsification tests passed — this graduates from hypothesis to finding.** The
+pre-registered rule was that any blend landing above +0.001416 (the lowest single-model offset)
+strikes the subsection. Five blends have now landed at +0.001408, +0.001273, +0.001199, +0.001187,
++0.001163 — every one below, and **monotonically decreasing in the number of legs** (2, 3, 4, 5, 13).
+The single-model and blend ranges still do not overlap at n=13.
 
-The offsets are also *monotonically decreasing* in the number of legs (2 legs +0.001408, 3 +0.001273,
-4 +0.001199, 5 +0.001187), which the noise explanation does not predict — but an ordering over four
-points is exactly the kind of pattern that fooled the retracted claim above.
+**Operational consequence, now licensed:** a blend's OOF gain does not transfer to the LB at par.
+Observed conversions: +0.000295 OOF → +0.00016 LB; +0.000254 → +0.00018; +0.000282 → +0.00027.
+Discount blend OOF gains before comparing them to the gate.
 
 **The first rank inversion, at n=9.** C1 beat B7 on OOF (0.966604 vs 0.966353, +0.000251) and *lost*
 to it on LB (0.96802 vs 0.96806). That is why Spearman fell from 0.976 to 0.950 — not a worse
@@ -639,6 +641,32 @@ a post-hoc description: a leg below ~0.965 solo does not enter the pool, whateve
 in-context learning needs the training set *as context* and targets thousands of rows, not 691k. A
 subsampled context reproduces E3's failure mode by construction — weak, and decorrelated for the
 wrong reason.
+
+## Final submission selection (§7)
+
+Both finals are submitted, so both are selectable at the deadline (2026-08-31).
+
+| | run | construction | OOF | LB |
+|---|---|---|---|---|
+| **Final A** | `ffb65555` | 5 legs, nested-selected | **0.967733** | **0.96892** |
+| **Final B** | `2b54a858` | 13 legs, **no selection step** | 0.967567 | 0.96873 |
+
+**Final A** is the honest champion: best OOF, best LB, simplest defensible recipe.
+
+**Final B** is the variance-reduced twin, and it is *worse* on OOF (−0.000166, on all five folds) and
+worse on LB (−0.00019). That is the point, and it is the same shape as S6E7's Final B, which scored
+0.00010 worse and was correct. Two sources of variance are removed:
+
+- **No selection step.** Final A's subset came from a procedure run over 16,369 candidates. It was
+  stable (5/5 folds chose identically) but it is still a step fitted on data, with variance on an
+  unseen split. Final B applies a fixed rule — solo OOF ≥ 0.965 — and averages everything that passes.
+- **More models averaged**: 13 against 5. Mean per-row std across constituent legs falls 0.03112 →
+  0.02772.
+
+**Deliberately excluded from Final B:** `K1 RealMLP` and `K2 FT-Transformer`, the Kaggle-T4 reruns.
+They would add two legs and probably a better number, but they are duplicate *recipes* of `F1real`
+and `G1ftt` already in the pool — averaging them is seed-bagging at the blend level, which is ruled
+out for this competition. Recorded here because the omission is deliberate and costs score.
 
 ## Experiment log
 
