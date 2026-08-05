@@ -1,0 +1,18 @@
+{
+ "id": "gcarno/s6e8-realmlp",
+ "title": "s6e8-realmlp",
+ "code_file": "s6e8-realmlp.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": true,
+ "enable_gpu": true,
+ "enable_tpu": false,
+ "enable_internet": true,
+ "keywords": [],
+ "dataset_sources": [],
+ "kernel_sources": [],
+ "competition_sources": [
+  "playground-series-s6e8"
+ ],
+ "model_sources": []
+}

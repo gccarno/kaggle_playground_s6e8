@@ -16,3 +16,8 @@ experiments/queue.json
 experiments/submit_log.csv
 experiments/.submit_queue.lock
 logs/
+
+# pytorch_tabular / lightning run debris
+lightning_logs/
+saved_models/
+.pt_tmp/

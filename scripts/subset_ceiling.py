@@ -27,8 +27,9 @@ REPO = Path(__file__).resolve().parent.parent
 LEGS = {"B6": "f64e2781", "B7": "6e3dd7c3", "B8": "9e68c7ce", "B10x": "7ebde432",
         "C1": "6a091632", "C2": "5daf6c12", "C3x": "0c32463c", "C4x": "fdeaa047",
         "D1cat": "7c1e9334", "E1mlp": "2fb89920", "E2emb": "8bd89dee",
-        "E3raw": "a594ffe2", "F1real": "53c678f6", "G1ftt": "b2f35b4a"}
-CHAMPION = ["B6", "B10x", "D1cat", "E1mlp"]
+        "E3raw": "a594ffe2", "F1real": "53c678f6", "G1ftt": "b2f35b4a",
+        "G2tab": "f1424102"}
+CHAMPION = ["B10x", "C4x", "D1cat", "E2emb", "F1real"]   # shipped ffb65555, LB 0.96892
 GATE = 0.0002
 
 

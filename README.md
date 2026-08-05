@@ -551,6 +551,95 @@ the lever was real and the test was too narrow. The pattern to distrust is not t
 been right every time — it is concluding *"X does not help"* from *"X did not help in the one place I
 put it."*
 
+## Running neural legs on Kaggle GPU
+
+Four architectures were run as dedicated GPU kernels (`s6e8-realmlp`, `s6e8-ftt`, `s6e8-tabtf`,
+`s6e8-node`), one notebook each with its own pinned `KAGGLE_CFG`, so they run concurrently rather
+than serially.
+
+### The P100 trap — read this before adding a GPU kernel
+
+The first push errored on all three within minutes:
+
+```
+CUDA error: no kernel image is available for execution on the device
+torch 2.10.0+cu128   Tesla P100-PCIE-16GB
+```
+
+`enable_gpu: true` in `kernel-metadata.json` gets you a **Tesla P100** (compute capability 6.0), and
+the Kaggle image ships **torch 2.10.0+cu128**, whose builds no longer contain Pascal kernels. Kaggle's
+default GPU cannot run PyTorch on its own image.
+
+**Fix:** `kaggle kernels push -p <dir> --accelerator NvidiaTeslaT4`. Valid values are
+`NvidiaTeslaT4`, `NvidiaTeslaP100`, `Tpu1VmV38`. This flag exists **only on the push command** — there
+is no `kernel-metadata.json` equivalent — so `enable_gpu: true` alone silently allocates an unusable
+machine. Verified this was *not* our `pip install` upgrading torch: the logs say `(nothing
+reinstalled)`.
+
+Second trap: `kaggle kernels output` hit a `charmap` encoding error writing the log on a Windows
+console and left a **0-byte file**, which looks exactly like "the kernel died before starting". Run it
+with `PYTHONUTF8=1` to get the real traceback.
+
+### Local ↔ Kaggle reproducibility
+
+| model | local (RTX 3060, 6 GB) | Kaggle T4 (16 GB) | Δ | runtime |
+|---|---|---|---|---|
+| RealMLP | 0.966135 | 0.966116 | −0.000019 | 3870 s → 1664 s |
+| FT-Transformer | 0.965498 | 0.965436 | −0.000062 | 2176 s → 1662 s |
+| TabTransformer | 0.954146 | 0.953339 | −0.000807 | 18351 s → 2432 s |
+
+The first two deltas are inside the 0.000066 seed-noise floor, so the two hardware paths agree.
+
+### TabTransformer: capacity was never the problem
+
+Locally it OOM'd on 6 GB and had to run at batch 1024 / d_token 32, recorded at the time as *"not a
+like-for-like comparison with FT-Transformer, do not read the number"*. The T4 ran it at the full
+batch 4096 / d_token 64 — **4× the batch and 2× the token width moved it −0.000807**, i.e. slightly
+*worse* and negligible against a 0.012 deficit. **The caveat resolves in favour of the original
+number.** FT-Transformer at identical full capacity scores 0.965436, so the gap is architectural:
+TabTransformer attends over *categorical* tokens only, and this dataset has 3 low-cardinality
+categoricals against 18 continuous columns, so nearly all the signal bypasses the attention by
+construction. Capacity cannot route signal down a path it does not traverse.
+
+### NODE — a failed prediction worth more than the confirmation
+
+`976c2703`, solo **0.962186**, 1.4 h on the T4. NODE is the one architecture whose inductive bias is
+deliberately *tree-shaped*: ensembles of oblivious decision trees made differentiable by entmax
+feature selection and soft thresholds. The pre-registered prediction was that it would therefore sit
+**below 2.7% from the trees** — closer to them than any neural leg.
+
+| leg | solo | mean disagreement vs trees |
+|---|---|---|
+| F1 RealMLP | 0.966135 | 2.841% |
+| E1 MLP | 0.965935 | 2.986% |
+| G1 FT-Transformer | 0.965498 | 2.988% |
+| E2 embed-MLP | 0.965702 | 3.217% |
+| **K4 NODE** | **0.962186** | **3.427%** |
+
+**The prediction failed.** NODE is not closer to the trees — it is *further* from them than every
+actual neural leg, and roughly equidistant from both camps (3.427% vs trees, 3.245% vs neural).
+Making decision trees differentiable changes what they learn more than it preserves how they
+partition. A tree-shaped inductive bias did not produce tree-like predictions.
+
+### The 0.965 threshold, now predictive
+
+Three legs below ~0.965 solo have each damaged the blend, with the damage ordered by the deficit:
+
+| leg | solo | best blend contribution |
+|---|---|---|
+| K4 NODE | 0.962186 | −0.000353 |
+| G2 TabTransformer | 0.953339 | −0.000517 |
+| E3 raw-feature MLP | 0.940496 | −0.000647 |
+
+Every one is monotone toward zero as its weight shrinks — **optimal weight zero**. The threshold
+correctly forecast NODE's sign *before* the blend was computed, so it is now a screening rule and not
+a post-hoc description: a leg below ~0.965 solo does not enter the pool, whatever its disagreement.
+
+**TabICL remains the one architecture not run**, and it is inapplicable rather than skipped:
+in-context learning needs the training set *as context* and targets thousands of rows, not 691k. A
+subsampled context reproduces E3's failure mode by construction — weak, and decorrelated for the
+wrong reason.
+
 ## Experiment log
 
 `experiments/runs.csv` is append-only and tracked in git — one row per run, with a long free-text
