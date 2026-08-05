@@ -89,7 +89,7 @@ there are enough pairs, and re-judge any probe that cleared it by less than the 
 "distinguishable" by that test — two seeds genuinely are two different models — and it is still pure
 noise for decision-making, because another seed would move it again. Only the gate decides shipping.
 
-### OOF↔LB calibration (n=10)
+### OOF↔LB calibration (n=12)
 
 | run | tag | OOF | LB | offset |
 |---|---|---|---|---|
@@ -103,9 +103,10 @@ noise for decision-making, because another seed would move it again. Only the ga
 | `6a091632` | C1 lr 0.02 | 0.966604 | 0.96802 | +0.001416 |
 | `b171c0cf` | blend, 2 legs | 0.966902 | 0.96831 | +0.001408 |
 | `9e165a90` | blend, 3 families | 0.967197 | 0.96847 | +0.001273 |
-| **`facfe8de`** | **blend, 4 families (champion)** | **0.967451** | **0.96865** | +0.001199 |
+| `facfe8de` | blend, 4 families | 0.967451 | 0.96865 | +0.001199 |
+| **`ffb65555`** | **nested-selected 5-leg (champion)** | **0.967733** | **0.96892** | +0.001187 |
 
-**Spearman(OOF, LB) = +0.973, residual σ = 0.000131.**
+**Spearman(OOF, LB) = +0.979, residual σ = 0.000133.**
 
 §4's ~10 paired runs now exist, so the gate stops being provisional. **The gate stays at +0.0002**,
 which is 1.65σ of the measured residual rather than the 1σ §4 suggests as a floor — because the n=9
@@ -120,7 +121,7 @@ The two blends carry the two smallest offsets on the board, and the ranges do no
 | | n | mean offset | range |
 |---|---|---|---|
 | single models | 8 | +0.001646 | +0.001416 … +0.001805 |
-| blends | 3 | +0.001293 | +0.001199 … +0.001408 |
+| blends | 4 | +0.001267 | +0.001187 … +0.001408 |
 
 Consistent with it, the 3-family blend's OOF gain of +0.000295 converted to +0.00016 on the LB, and
 the 4-family blend's +0.000254 converted to +0.00018. A mechanism is available — part of what blending
@@ -130,12 +131,14 @@ cancels is *OOF-specific* noise, which has nothing to cancel on the test set —
 **Still a hypothesis, still not being acted on.** The near-identical claim about target-encoded models
 was made at n=1 earlier in this file and refuted by the next run.
 
-**Falsification test, first of three: SURVIVED.** The pre-registered rule was that any blend landing
-above +0.001416 (the lowest single-model offset) strikes this subsection. `facfe8de` landed at
-+0.001199 — below the range, and the lowest offset yet. Two more blends to go before this graduates
-from hypothesis to finding. Note also that the blend offsets are *monotonically decreasing* with the
-number of legs (2 legs +0.001408, 3 +0.001273, 4 +0.001199), which the noise explanation does not
-predict — but three points and an ordering is exactly the kind of pattern that fooled the last claim.
+**Falsification tests, two of three: SURVIVED.** The pre-registered rule was that any blend landing
+above +0.001416 (the lowest single-model offset) strikes this subsection. `facfe8de` came in at
++0.001199 and `ffb65555` at +0.001187 — both below the threshold, each the lowest yet. One more blend
+before this graduates from hypothesis to finding.
+
+The offsets are also *monotonically decreasing* in the number of legs (2 legs +0.001408, 3 +0.001273,
+4 +0.001199, 5 +0.001187), which the noise explanation does not predict — but an ordering over four
+points is exactly the kind of pattern that fooled the retracted claim above.
 
 **The first rank inversion, at n=9.** C1 beat B7 on OOF (0.966604 vs 0.966353, +0.000251) and *lost*
 to it on LB (0.96802 vs 0.96806). That is why Spearman fell from 0.976 to 0.950 — not a worse
@@ -501,6 +504,52 @@ That is a deadline decision, not a champion decision.
 The closest miss, `B6+C4x+D1cat+E1mlp+E2emb` at +0.000183, is **not** being shipped. It is 0.9× the
 gate, the gate was pre-registered, and moving it now to admit the run that just missed it is precisely
 what a pre-registered gate exists to prevent.
+
+## Nested subset selection — the wall was mis-measured twice
+
+After three hand-picked combinations landed at ~0.9× the gate, `scripts/subset_ceiling.py` scored
+**all 16,369 equal-weight subsets** of the 14 legs. Best: +0.000282. **That number alone is worthless**
+— a maximum over thousands of candidates on the same OOF rows is precisely the §5 selection bias that
+produced a fake +0.00014 in S6E7, and the script says so in its own docstring.
+
+What made it worth testing rather than dismissing: the top 13 subsets *all* contained C4x, E2emb and
+F1real, and none of the three was in the champion. Bias-driven maxima scatter their membership.
+
+So `scripts/nested_subset.py` nested **the selection itself** — each outer fold chose a subset using
+only the other four, then was scored on the fold the chooser never saw:
+
+| | |
+|---|---|
+| champion, held out | 0.967451 |
+| selected subset, held out | **0.967733** |
+| **delta** | **+0.000282** — clears |
+| per-fold | +0.000245, +0.000374, +0.000195, +0.000247, +0.000342 |
+| folds positive | **5/5** |
+| distinct subsets chosen | **1** |
+
+**All five folds chose the identical subset from disjoint selection data**, so the nested and full-OOF
+numbers coincide — the procedure is deterministic under resampling, which selection bias cannot be.
+
+Shipped as `ffb65555` — `B10x + C4x + D1cat + E2emb + F1real`, equal weights. **LB 0.96865 → 0.96892.**
+
+### Correction: C4 was not worth nothing
+
+This file previously recorded C4 (Optuna XGBoost) as "the biggest solo win since target encoding,
+worth nothing." That was wrong, and wrong in a specific, repeatable way: **I tested one pairing** —
+swapping C4 into the existing champion — measured +0.000068, and generalised from a single
+configuration to the whole lever. C4 appears in every subset the nested procedure selected.
+
+Every change the selected subset makes to the champion swaps a weak leg for a strong one: C4x added,
+B6 (weakest tree) dropped, E1 replaced by E2emb and F1real (the two stronger neural legs). That is a
+mechanism, and it is the one the disagreement table already implied — the neural direction has a
+single axis, so its *strongest* representatives should hold it, not its first.
+
+**This is the second time in this competition a "closed" verdict came from testing one configuration
+instead of the space.** The first was declaring the ensemble axis closed over three tree libraries and
+one MLP shape, before RealMLP, FT-Transformer or any feature-set variation had been run. Both times
+the lever was real and the test was too narrow. The pattern to distrust is not the gate — the gate has
+been right every time — it is concluding *"X does not help"* from *"X did not help in the one place I
+put it."*
 
 ## Experiment log
 
