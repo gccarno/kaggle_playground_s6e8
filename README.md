@@ -421,6 +421,34 @@ decorrelation far beyond anything architecture variation reached (10.2% vs 3.4%)
 decorrelation was worthless. So the wall may well be real — but it had not been tested where it
 mattered when the claim was made.
 
+### F1 RealMLP — the test the claim needed, and it holds
+
+Run `53c678f6`. A real fifth family, not an MLP reshape: PLR periodic-linear numeric embeddings, its
+own scaling pipeline and LR schedule. It lands **in the useful quadrant** — the thing §6 says should
+not exist once the axis is closed:
+
+| | solo OOF | disagreement vs trees |
+|---|---|---|
+| F1 RealMLP | **0.966135** | 2.685 – 3.037% |
+| E1 our MLP | 0.965935 | 2.827 – 3.165% |
+| B6 LightGBM | 0.966384 | — |
+
+Stronger than our own MLP and decorrelated from every tree. And the blend:
+
+| blend | Δ vs champion | |
+|---|---|---|
+| champion + F1 (5 legs) | +0.000046 | miss |
+| swap E1 → F1 | −0.000005 | miss |
+| champion + F1 + E2 (6 legs) | +0.000154 | miss |
+
+**None clears.** The diagnostic number is `F1 vs E1 = 1.884%` — the two neural legs disagree with each
+other *less* than either disagrees with the trees, despite being independently designed
+architectures. The neural family contributes one direction of disagreement, and E1 already spent it.
+
+This is the strongest available evidence that the wall is real rather than an artefact of narrow
+sampling: a properly different, properly strong architecture was added exactly where the theory says
+a gain should appear, and it produced +0.000046.
+
 The closest miss, `B6+C4x+D1cat+E1mlp+E2emb` at +0.000183, is **not** being shipped. It is 0.9× the
 gate, the gate was pre-registered, and moving it now to admit the run that just missed it is precisely
 what a pre-registered gate exists to prevent.
