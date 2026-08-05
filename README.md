@@ -449,6 +449,55 @@ This is the strongest available evidence that the wall is real rather than an ar
 sampling: a properly different, properly strong architecture was added exactly where the theory says
 a gain should appear, and it produced +0.000046.
 
+### G1 FT-Transformer — three architectures, one direction
+
+Run `b2f35b4a`. Attention over feature tokens: a third inductive bias, neither partitioning nor dense
+mixture. Solo 0.965498, competitive. The pre-registered test was whether it would disagree with the
+*existing neural legs* at ~2% (direction spent) or 3%+ (axis open).
+
+| G1 vs | disagreement |
+|---|---|
+| F1 RealMLP | **2.208%** |
+| E1 MLP | **2.429%** |
+| B10x XGBoost | 3.157% |
+| B6 LightGBM | 2.879% |
+| D1 CatBoost | 2.870% |
+
+**Every neural pair is closer to every other neural leg than any of them is to a tree.** Three
+independently designed architectures — dense mixture, PLR embeddings, feature-token attention —
+converge on the same alternative to tree partitioning. E1 spent that direction; F1 and G1 bought
+strength, not diversity. Adding G1 to the champion: **−0.000019**.
+
+### The architecture sweep, complete picture
+
+| leg | architecture | solo OOF | vs other neural legs | blend Δ |
+|---|---|---|---|---|
+| E1 | MLP | 0.965935 | — | +0.000254 → shipped |
+| E2 | MLP + embeddings | 0.965702 | 2.990% | +0.000137 |
+| F1 | RealMLP (PLR) | 0.966135 | 1.884% | +0.000046 |
+| G1 | FT-Transformer | 0.965498 | 2.208 – 2.429% | −0.000019 |
+| E3 | MLP, raw features | 0.940496 | 9.571% | −0.000647 |
+
+Wall test over 8 legs: **Spearman −0.738, p = 0.037** (was −0.583 ns at 9 tree-ish legs, then −0.645).
+S6E7's closed wall was −0.84.
+
+**Not attempted, and why:** NODE has no maintained package and would be a from-scratch build, only
+justified if something above had surprised. TabICL is *not applicable* — in-context learning needs the
+training set as context and targets thousands of rows, not 691k; a subsampled context reproduces E3's
+failure mode by construction, weak and decorrelated for the wrong reason.
+
+### The 0.9× pattern
+
+Three independent combinations have landed at **+0.000183, +0.000154, +0.000197** — all ≈0.9× the
+gate, none over. Piling on legs asymptotes just below the line. Calling +0.000197 "basically +0.0002"
+is exactly what a pre-registered gate exists to prevent, and the blend-offset hypothesis predicts a
++0.0002 OOF gain converts to roughly +0.00013 on the LB anyway.
+
+§7 gives a *separate* and legitimate reason to submit such a blend before the deadline: finals may
+only be selected from entries actually submitted, and an all-legs equal-weight blend is a sound
+variance-reduced **Final B** candidate — which is how S6E7's Final B was chosen, not on public LB.
+That is a deadline decision, not a champion decision.
+
 The closest miss, `B6+C4x+D1cat+E1mlp+E2emb` at +0.000183, is **not** being shipped. It is 0.9× the
 gate, the gate was pre-registered, and moving it now to admit the run that just missed it is precisely
 what a pre-registered gate exists to prevent.
