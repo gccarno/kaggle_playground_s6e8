@@ -58,11 +58,15 @@ COMP = "playground-series-s6e8"
 # ---- everything a probe is allowed to change ------------------------------
 DEFAULTS = {
     "run_tag":       "champion",
-    "learner":       "lgb",        # lgb | xgb | cat | mlp | realmlp | ftt | tabtf | node | lookupt
+    "learner":       "lgb",        # lgb | xgb | cat | mlp | realmlp | tabm | ftt | tabtf | node | lookupt
     "model_seed":    42,           # model randomness ONLY -- never the CV split seed
     "fe_interaction": False,       # B1: opens_per_hour, notif_per_hour, notif_per_open
     "fe_composition": False,       # B2: other_hours, share_*, weekend_ratio, screen_total
     "fe_normalization": False,     # B3: free_time, screen_per_sleep, screen_per_age, social_per_age
+    "fe_impute":     False,        # P2-B3: model-impute the 9 numerics and add the results as
+                                   # EXTRA columns (imp_*) plus the engineered families
+                                   # recomputed on them (impfe_*). The originals keep their
+                                   # NaNs. Augment, never replace -- see the cell below.
     "drop_flat_cats": False,       # B5: drop gender/stress_level/academic_work_impact
     "num_as_cat":    False,        # D2: declare the 9 numeric columns CATEGORICAL, acting on the
                                    # EDA finding that their value->target map is a lookup table
@@ -105,7 +109,7 @@ code(r"""
 # Kaggle-only dependency install. The package is looked up FROM CFG["learner"], so this cell
 # cannot drift out of sync with what the fold loop actually imports -- S6E7 lost time to
 # exactly that failure (pytabkit missing at run time). Local runs already have these.
-EXTRA_PKG = {"realmlp": "pytabkit", "ftt": "rtdl_revisiting_models",
+EXTRA_PKG = {"realmlp": "pytabkit", "tabm": "pytabkit", "ftt": "rtdl_revisiting_models",
              "tabtf": "tab-transformer-pytorch", "node": "pytorch_tabular"}
 if ON_KAGGLE and CFG["learner"] in EXTRA_PKG:
     import subprocess, sys as _sys
@@ -195,6 +199,65 @@ def engineer(df):
 train_fe, added = engineer(train)
 test_fe,  _     = engineer(test)
 
+
+def impute_numeric(tr, te):
+    # One XGBRegressor per numeric column, fit on the OBSERVED rows of train + test.
+    #
+    # LEAKAGE STATUS -- read before moving this. The target is never involved: each model
+    # predicts a FEATURE from other features. That makes it transductive UNSUPERVISED
+    # preprocessing, which README.md section 2 licenses outside the CV loop, exactly like
+    # the category vocabulary and the lookup-id mapping. A target encoder in this position
+    # would be a leak; this is not one.
+    #
+    # It is, however, the one feature family here that is NOT row-wise: a row's imputed
+    # value depends on other rows. That is why the row-wise purity assertion below is
+    # scoped to exclude these columns rather than being deleted.
+    # (Comments, not a docstring -- a triple-quoted string here would terminate the
+    # generator's own code(r\"\"\"...\"\"\") block.)
+    import xgboost as xgb
+    n = len(tr)
+    full = pd.concat([tr[RAW_NUM + RAW_CAT], te[RAW_NUM + RAW_CAT]], ignore_index=True)
+    for c in RAW_CAT:
+        full[c] = full[c].astype("category")
+    out = full[RAW_NUM].copy()
+    for col in RAW_NUM:
+        obs = full[col].notna().to_numpy()
+        feats = [c for c in RAW_NUM + RAW_CAT if c != col]
+        m = xgb.XGBRegressor(n_estimators=400, learning_rate=0.08, max_depth=6,
+                             subsample=0.8, colsample_bytree=0.8, min_child_weight=20,
+                             tree_method="hist", enable_categorical=True, n_jobs=-1,
+                             random_state=SEED)
+        m.fit(full.loc[obs, feats], full.loc[obs, col])
+        if (~obs).sum():
+            out.loc[~obs, col] = m.predict(full.loc[~obs, feats])
+    return out.iloc[:n].reset_index(drop=True), out.iloc[n:].reset_index(drop=True)
+
+
+IMPUTED_COLS = []
+if CFG["fe_impute"]:
+    # AUGMENT, NEVER REPLACE. The same imputer measures with opposite signs publicly:
+    # replacing the NaNs is negative, adding the imputed values alongside them is +0.0012.
+    # A GBM's native NaN handling learns a default split DIRECTION per node, which is
+    # strictly more expressive than one imputed point estimate dragging the row toward the
+    # middle of the distribution. What the imputed copy buys is coverage: a ratio is NaN
+    # whenever EITHER operand is missing, which is ~39% of rows, so the engineered families
+    # are unavailable exactly where they would say the most.
+    t0_imp = time.time()
+    tr_imp, te_imp = impute_numeric(train, test)
+    # The families recomputed on complete values. engineer() is reused rather than having
+    # its formulas restated, so the two copies cannot drift apart.
+    tr_imp_fe, imp_added = engineer(tr_imp)
+    te_imp_fe, _         = engineer(te_imp)
+    for dst, raw_src, fe_src in ((train_fe, tr_imp, tr_imp_fe), (test_fe, te_imp, te_imp_fe)):
+        for c in RAW_NUM:
+            dst[f"imp_{c}"] = raw_src[c].to_numpy()
+        for c in imp_added:
+            dst[f"impfe_{c}"] = fe_src[c].to_numpy()
+    IMPUTED_COLS = [f"imp_{c}" for c in RAW_NUM] + [f"impfe_{c}" for c in imp_added]
+    added = added + IMPUTED_COLS
+    print(f"fe_impute: +{len(IMPUTED_COLS)} columns in {time.time() - t0_imp:.0f}s "
+          f"(originals keep their NaNs)")
+
 cat_cols = [] if CFG["drop_flat_cats"] else RAW_CAT
 FEATURES = RAW_NUM + added + cat_cols
 print(f"{len(FEATURES)} features = {len(RAW_NUM)} raw num + {len(added)} engineered + {len(cat_cols)} cat")
@@ -216,14 +279,35 @@ if CFG["fe_composition"]:
 
 # Row-wise purity: recomputing FE on a shuffled subset must give identical values.
 # This is what proves no cross-row aggregation crept in (which WOULD be a leak).
-if added:
+#
+# The imputed columns are DELIBERATELY excluded, and this is the only exemption in the
+# notebook. Imputation is genuinely cross-row -- a row's imputed value is predicted from a
+# model fitted on other rows -- so it cannot satisfy this invariant by construction. It is
+# still leak-free with respect to the TARGET, which is the property that matters and which
+# the certification cell checks separately. Scoping the assertion is the honest move;
+# deleting it would silently stop checking the eight families that ARE row-wise.
+row_wise = [c for c in added if c not in IMPUTED_COLS]
+if row_wise:
     probe = train.sample(2000, random_state=0)
     re_fe, _ = engineer(probe)
-    ref = train_fe.loc[probe.index, added]
-    assert np.allclose(re_fe[added].to_numpy(dtype="float64"),
+    ref = train_fe.loc[probe.index, row_wise]
+    assert np.allclose(re_fe[row_wise].to_numpy(dtype="float64"),
                        ref.to_numpy(dtype="float64"), equal_nan=True), \
         "FE is not row-wise -- values changed when computed on a subset"
-    print("row-wise purity: FE identical on a 2000-row shuffled subset -> no cross-row leakage")
+    print(f"row-wise purity: {len(row_wise)} FE columns identical on a 2000-row shuffled "
+          "subset -> no cross-row leakage")
+if IMPUTED_COLS:
+    # What we CAN assert about the imputed block: it never sees the target, it is complete
+    # where the source column was observed, and it left the originals alone.
+    for c in RAW_NUM:
+        obs = train[c].notna().to_numpy()
+        assert np.allclose(train_fe.loc[obs, f"imp_{c}"].to_numpy(dtype="float64"),
+                           train[c][obs].to_numpy(dtype="float64")), \
+            f"imp_{c} altered an OBSERVED value -- imputation must only fill gaps"
+        assert train_fe[c].isna().sum() == train[c].isna().sum(), \
+            f"{c} lost its NaNs -- fe_impute must AUGMENT, never replace"
+    print(f"imputed block: {len(IMPUTED_COLS)} columns, observed values untouched, "
+          "originals still carry their NaNs")
 
 print(f"\nengineered-column coverage (non-null %):")
 for c in added:
@@ -782,13 +866,25 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
             torch.cuda.empty_cache()
         print(f"    lookupt: {1 + NLOOK + NDER} tokens, best epoch {best_ep} "
               f"(val AUC {best_auc:.6f}), dev={dev}", flush=True)
-    elif CFG["learner"] == "realmlp":
+    elif CFG["learner"] in ("realmlp", "tabm"):
         # RealMLP (pytabkit) -- the strongest published tabular-NN baseline, and NOT a
         # reshaped version of our own MLP: it brings periodic-linear (PLR) numeric
         # embeddings, a bespoke scaling/tfms pipeline and its own LR schedule. Its own
         # validation split is passed in explicitly so it never sees the val fold's labels
         # through an internal random split.
-        from pytabkit import RealMLP_TD_Classifier
+        #
+        # TabM shares this branch because it shares the pytabkit interface and the same
+        # no-NaN constraint, so duplicating the preprocessing would only let the two copies
+        # drift. It is NOT the same model: TabM is a PACKED ENSEMBLE of MLPs trained
+        # jointly (k parallel heads over shared weights), which is a variance-reduction
+        # mechanism rather than another architecture shape. The public library's evidence
+        # for it is the reason it is here at all -- 9 members, best 0.96867, the strongest
+        # family after the library author's own models and well above our best neural leg
+        # at 0.9661.
+        if CFG["learner"] == "tabm":
+            from pytabkit import TabM_D_Classifier as _PTK
+        else:
+            from pytabkit import RealMLP_TD_Classifier as _PTK
         hp = {"n_epochs": 60, "batch_size": 1024, **CFG["lgb_params"]}
         Rtr, Rva, Rte = Xtr.copy(), Xva.copy(), Xte.copy()
         for c in cat_cols:                       # pytabkit wants plain strings, no NaN
@@ -804,7 +900,7 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
                 if Xtr[c].isna().any() or d[c].isna().any():
                     d[f"{c}__isna"] = d[c].isna().astype("float32")
             d[r_num] = d[r_num].fillna(r_med)
-        model = RealMLP_TD_Classifier(
+        model = _PTK(
             device="cuda" if __import__("torch").cuda.is_available() else "cpu",
             random_state=CFG["model_seed"], verbosity=0,
             val_metric_name="1-auc_ovr",   # binary auc_ovr IS roc_auc -- the metric, not a proxy

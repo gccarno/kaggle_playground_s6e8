@@ -9,6 +9,10 @@ experiments/preds/
 experiments/blends/
 # harvested public submission/artifact bank (large, not ours to redistribute)
 experiments/bank/
+# public OOF library, attached as a DIAGNOSTIC only (never an input to a submission).
+# ~585 MB and not ours to redistribute; re-fetch with
+#   kaggle datasets download szymonkapiski/s6e8-oof-library-47-models -p experiments/public_lib --unzip
+experiments/public_lib/
 # single-model file submissions built from per-learner proba artifacts
 experiments/singles/
 # auto-submit queue state + logs (reference gitignored local CSVs; runs.csv stays tracked)
