@@ -825,6 +825,60 @@ negative. The 65,519-subset equal-weight scan put NODE in exactly zero of its to
 §6's "legs below ~0.965 solo damage the blend" is a property of the **combiner**, not of the legs,
 and should now be read as *"below 0.965 a leg cannot help an equal-weight mean."*
 
+### B2 — the budget constraint, the largest feature win since target encoding
+
+`daily_screen_time_hours ≥ social + gaming + work` holds in **100.00000%** of all 859,029
+train+test rows, minimum gap exactly 0.000. `fe_composition` has existed in the generator since
+Phase 1, but was only ever run in the **pre-target-encoding** B1 era, where the ratio family
+failed. `engineered` was empty on all five champion legs. Rerun as strict twins on the
+target-encoded feature set:
+
+| engine | baseline | + composition | delta |
+|---|---|---|---|
+| XGBoost (C4 `fdeaa047`) | 0.967176 | **0.968180** `f047412f` | **+0.001004** |
+| LightGBM (B6 `f64e2781`) | 0.966384 | **0.967547** `7d1de67e` | **+0.001163** |
+| CatBoost (D1 `7c1e9334`) | 0.966890 | *replication arm running* | |
+
+Five to six times the gate, and within 0.00005 of the public 10-fold ablation of the same
+feature (+0.00096). **Fold-count independence is the mechanism's own prediction** — a 4-term
+linear combination is not something axis-aligned splits can build at *any* data volume — and it
+is what separates this from the same author's log-ratio features, which collapse from +0.00036
+at 3 folds to +0.00001 at 10 as the trees learn those relationships from splits by themselves.
+
+Fourth instance of the pattern this file already names: concluding *"X does not help"* from
+*"X did not help in the one place I put it."*
+
+### L1 — the Lookup-Transformer breaks the §6 wall
+
+Pre-registered on **decorrelation, not strength**. It passed both halves, and the second is the
+interesting one:
+
+| | measured | gate |
+|---|---|---|
+| solo OOF | **0.968626** — our strongest leg ever | ≥ 0.9655 |
+| max logit-space \|corr\| vs the other 18 legs | **0.9796** | ≤ 0.990 |
+
+For scale, **the other legs' own median max-correlation is 0.9941.** Its nearest neighbours are
+the FT-Transformers at 0.979, not the trees.
+
+This is the first leg here that is simultaneously the **strongest** and the **most
+decorrelated**, which is the direct counter-example to §6's wall
+(`Spearman(strength, decorrelation) = −0.645`). The wall was a property of legs that all read the
+**same representation** — MLP, embedding-MLP, RealMLP, FT-Transformer, NODE — not a law about
+tabular models. Reading the same lattice structure through a *different mechanism* buys both at
+once. It takes the largest weight in the 19-leg stack, at +2.337.
+
+### Stage D interim — 19 legs, and the offset predicted itself to 0.00002
+
+| | OOF | LB |
+|---|---|---|
+| equal-weight champion `ffb65555` | 0.967733 | 0.96892 |
+| 16-leg stack `cdbffba5` | 0.967976 | 0.96928 |
+| **19-leg stack `6da97a58`** | **0.969228** | **0.97051** |
+
+**Predicted 0.97053 from the offset measured that morning; realised 0.97051.** Eight of the
+nineteen weights are negative. Public LB top was 0.97086 on 2026-08-07.
+
 ### Durability problems found while implementing (both fixed)
 
 - **`build_model_nb.py` was untracked**, living only in a session-scoped temp directory, while
