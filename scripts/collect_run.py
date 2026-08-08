@@ -91,9 +91,18 @@ def stage_push_dir(metadata):
     return staged
 
 
-def push_kernel(metadata=None):
+def push_kernel(metadata=None, accelerator=None):
     push_dir = stage_push_dir(metadata) if metadata else REPO_ROOT
-    out = run(["kaggle", "kernels", "push", "-p", str(push_dir)])
+    cmd = ["kaggle", "kernels", "push", "-p", str(push_dir)]
+    # `enable_gpu: true` in kernel-metadata.json allocates a Tesla P100 (compute 6.0), and
+    # the Kaggle image ships torch 2.10.0+cu128, whose builds contain no Pascal kernels --
+    # so the default GPU cannot run PyTorch on Kaggle's own image and every fold dies with
+    # "no kernel image is available for execution on the device". The accelerator choice
+    # exists ONLY as a push flag; there is no kernel-metadata.json equivalent. See the
+    # P100 section of README.md.
+    if accelerator:
+        cmd += ["--accelerator", accelerator]
+    out = run(cmd)
     print(out.stdout); print(out.stderr, file=sys.stderr)
     if out.returncode != 0:
         raise RuntimeError(f"kaggle kernels push failed: {out.stderr}")
@@ -276,6 +285,11 @@ def main():
     ap.add_argument("--metadata", default=None,
                     help="kernel metadata json (default kernel-metadata.json); "
                          "use kernel-metadata-model.json for the modelling kernel")
+    ap.add_argument("--accelerator", default=None,
+                    choices=["NvidiaTeslaT4", "NvidiaTeslaP100", "Tpu1VmV38"],
+                    help="GPU type for this push. REQUIRED for any torch kernel: "
+                         "enable_gpu alone gets a P100, which cannot run the image's torch. "
+                         "Use NvidiaTeslaT4.")
     ap.add_argument("--poll-interval", type=int, default=60, help="Seconds between status checks")
     ap.add_argument("--timeout-min", type=int, default=180, help="Max minutes to wait for completion")
     ap.add_argument("--notes", default="", help="Freeform notes column -- hypothesis, mechanism, gate")
@@ -290,7 +304,7 @@ def main():
 
     version = None
     if not args.no_push:
-        version = push_kernel(metadata)
+        version = push_kernel(metadata, args.accelerator)
         print(f"Pushed. Detected version: {version!r} (best-effort parse; may be None)")
 
     print(f"Polling {ref} for completion...")
