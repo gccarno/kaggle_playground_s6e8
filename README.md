@@ -785,6 +785,58 @@ three partitions), all of it looks healthy, and **no distributional statistic de
 a deliberately leaked model inflates AUC by 0.0054 while moving a KS statistic by 0.0002. Read the
 code for `n_splits` and `random_state`, and check whether `random_state` is a loop variable.
 
+## Phase 2 — implementing the audit findings
+
+### B1 — the fitted stacker ships, and the optimism worry was wrong
+
+`scripts/stack_logit.py`, run `cdbffba5`, 16 legs, logit space, meta-model refit inside each
+outer fold, `C=0.1` chosen from two adjacent points on a plateau flat to 1e-6.
+
+| | OOF | LB | offset |
+|---|---|---|---|
+| equal-weight champion `ffb65555` | 0.967733 | 0.96892 | +0.00119 |
+| **logit stack `cdbffba5`** | **0.967976** | **0.96928** | **+0.00130** |
+| delta | +0.000243 | **+0.00036** | |
+
+**The pre-registered prediction was LB 0.96917 and it came in at 0.96928** — 0.00011 *above*.
+That was the whole point of submitting: the stack's OOF carries a meta-fit optimism the
+equal-weight champion does not (the base legs' OOF come from models fitted on this same
+partition, so a meta-model training on folds 1–4 consumes predictions from base models that saw
+fold 0). If that optimism were material the LB gain would have come in *below* the OOF gain.
+It came in **larger** — +0.00036 on the LB against +0.000243 on OOF. The falsification test was
+pre-registered at "below ~0.96900 demotes stacking"; it passed with room.
+
+Stacking is now the shipping combiner. **New best LB: 0.96928.**
+
+Fitted weights, and why this matters more than the number:
+
+| leg | learner | solo | weight |
+|---|---|---|---|
+| `fdeaa047` | XGBoost (Optuna) | 0.9672 | +1.692 |
+| `8bd89dee` | embedding-MLP | 0.9657 | +1.180 |
+| **`976c2703`** | **NODE** | **0.9622** | **−0.792** |
+| `7c1e9334` | CatBoost | 0.9669 | +0.665 |
+| … | | | |
+| `f64e2781` | LightGBM (B6) | 0.9664 | −0.288 |
+
+**NODE takes the third-largest weight in the stack, negative.** Four of sixteen weights are
+negative. The 65,519-subset equal-weight scan put NODE in exactly zero of its top 25 — correctly,
+*for an average*, which can only add and so can only dilute a weak-but-differently-wrong model.
+§6's "legs below ~0.965 solo damage the blend" is a property of the **combiner**, not of the legs,
+and should now be read as *"below 0.965 a leg cannot help an equal-weight mean."*
+
+### Durability problems found while implementing (both fixed)
+
+- **`build_model_nb.py` was untracked**, living only in a session-scoped temp directory, while
+  every notebook in the repo is generated from it. Now `scripts/build_model_nb.py`.
+- **KCFG is parsed as JSON but baked into Python source.** The first config containing a boolean
+  rendered `"fe_composition": true` and would have died with a `NameError` on the kernel's first
+  cell. Now round-tripped through `json.loads` → `repr`, which also fails on a malformed CFG
+  locally instead of on Kaggle.
+- `collect_run.py` gained `--accelerator`; the P100 workaround was tribal knowledge until now.
+- C4's Optuna parameters lived only in gitignored `.kaggle_output/`. They are now carried in the
+  B2 row's `notes`, which is tracked.
+
 ## Experiment log
 
 `experiments/runs.csv` is append-only and tracked in git — one row per run, with a long free-text
