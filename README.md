@@ -668,6 +668,123 @@ They would add two legs and probably a better number, but they are duplicate *re
 and `G1ftt` already in the pool — averaging them is seed-bagging at the blend level, which is ruled
 out for this competition. Recorded here because the omission is deliberate and costs score.
 
+## Public-frontier audit (2026-08-07)
+
+Read the top public notebooks to find what we had not tried. Public LB then topped out at 0.97086
+against our 0.96892. Three of their findings are directly actionable and one of them is measured
+below; the rest of the audit is recorded because knowing what the frontier tried and rejected is
+worth as much as the wins.
+
+**Their CV→LB offset is +0.0012, and so is ours** (0.967733 → 0.96892 = +0.00119). Two independent
+pipelines agreeing on the offset to the fifth decimal means our §4 calibration is sound and their
+OOF numbers are directly comparable to ours. It also means the public 0.97086 corresponds to roughly
+0.9697 OOF — about **+0.0019 above our champion**, so the gap is real signal, not LB noise.
+
+### 1. We have only ever built equal-weight averages — and that is why NODE looked useless
+
+`make_blend.py`, `subset_ceiling.py` and `nested_subset.py` all search over *which* legs, never over
+*how much*. Both top public notebooks instead fit a logistic regression on the OOF matrix **in logit
+space**, and both report negative coefficients. `scripts/logit_stack.py` tests that on our own 16
+legs, meta-model refit inside each outer fold:
+
+| combiner | OOF | vs champion |
+|---|---|---|
+| best single leg (`C4x`) | 0.967176 | −0.000557 |
+| equal-weight over all 16 legs | 0.967430 | −0.000303 |
+| **equal-weight champion, 5 legs** | **0.967733** | — |
+| logistic stack on **probabilities** | 0.967760 | +0.000027 |
+| **logistic stack on logits** | **0.967976** | **+0.000243** ✅ |
+
+Flat in `C` (0.03/0.1/1.0 differ by 3e-6), so it is not a knife-edge fit. Two mechanisms, and the
+second is the one that matters:
+
+- **Logits, not probabilities.** Probabilities buy +0.000027, logits +0.000243 — nearly ten times as
+  much. This target saturates (the top screen-time decile is ~100% positive), so near p=1 the
+  probability scale has no resolution left while log(p/(1−p)) still does.
+- **A fitted combiner can subtract.** 4 of 16 weights are negative, and **`K4node` takes the third
+  largest weight in the whole stack, at −0.796.** That reverses this repo's conclusion about NODE.
+  The §6 finding that legs below ~0.965 solo "damage the blend" is a property of the *combiner*, not
+  of the legs: an average can only dilute a weak-but-differently-wrong model, so it got thrown out of
+  all 65,519 subsets. Given a sign, it is load-bearing. Same for `B6`, `B8`, `C1`.
+
+This is the third instance of the pattern already named in this file — concluding *"X does not help"*
+from *"X did not help in the one place I put it."* The 0.965 screening rule should now read *"below
+0.965 a leg cannot help an equal-weight mean"*, which is a much narrower claim.
+
+Caveat, shared with every public stack: the base legs' OOF come from models fitted on this same
+partition, so a meta-model training on folds 1–4 consumes predictions from base models that saw
+fold 0. That inflates all stack rows above by a small constant. It does not affect the comparison
+between two combiners on identical inputs, which is what the script exists for.
+
+### 2. The budget constraint was never tested on the target-encoded feature set
+
+`daily_screen_time_hours ≥ social + gaming + work` holds in 100.00000% of all 859,029 train+test
+rows (min gap exactly 0.000, 546 rows on the boundary) — a generator invariant, and the remainder is
+a real latent variable at solo AUC 0.765. `fe_composition` exists in the generator (`build_model_nb.py:64`)
+and computes exactly this. **The `engineered` column is empty on all five champion legs.** Only B1
+(the ratio family) was ever run; it failed, we moved to target encoding at B6, and the composition
+family was never revisited on top of it.
+
+tamerlanomralinov ablates it at 10-fold: **+0.00096 per fold**, matching its 3-fold measurement of
++0.00092. That is ~5× our gate. His stated mechanism is that a 4-term linear combination is something
+axis-aligned splits cannot build *at any data volume* — which is why it survives more folds, while
+his log-ratio features gave +0.00036 at 3-fold and +0.00001 at 10-fold. **Validate FE at the fold
+count you will submit with.**
+
+### 3. Imputation as extra columns, never as a replacement
+
+tomasa2 measures the same XGB imputer with opposite signs: imputed values *replacing* NaNs is
+negative, imputed values *alongside* the retained NaN columns is +0.0012. A NaN-native GBM learns a
+default split direction per node, which is strictly more expressive than one imputed point estimate;
+but the imputed column restores ratio-feature coverage on the 39% of rows where some input is
+missing. We currently do neither.
+
+### Measured dead ends on the public frontier — do not re-run these
+
+| idea | reported effect |
+|---|---|
+| concatenating the original `jayjoshi37` dataset | −0.0001 (also true here: 7,500 rows ≈ 1.1%) |
+| NA-indicator features / `n_missing` | ≈ 0 — missingness is MCAR (target rate 0.708/0.710/0.711 by regime) |
+| pairwise / multi-resolution / adaptive-smoothing TE | −0.0004 to +0.00002; plain single-column TE at smoothing 10 is the optimum |
+| `age` as a categorical | −0.0006 |
+| naive mean or rank-average of a large library | −0.0012 |
+| tree depth 9–13 | to −0.0011 |
+| seed-averaging a member to strengthen it | +0.00015 solo, **+0.000000 to the blend** (corr 0.9994) |
+| record linkage / duplicate rows | none exist — 1 duplicate pair in 565,846 rows |
+
+The last row but one independently confirms the standing no-seed-bagging constraint, with a number.
+
+### The architecture we do not have
+
+`lookup` (tamerlanomralinov's Lookup-Transformer) is the single load-bearing member of the 74-model
+public stack: dropping it costs −0.000106, **6.6× the next member**, and 73 of 74 members cost less
+than 0.00002 to drop. Its premise is that the generator memorised value→label associations, so each
+column's *exact value* is a lookup key rather than a magnitude — `notifications_per_day` has
+univariate AUC 0.492 yet its per-value residuals correlate 0.72 across two independent halves of the
+data. It gives every exact observed value its own 128-d embedding, adds a periodic-linear (learned
+Fourier) numeric embedding for the smooth trend, gives NaN its own learned per-column vector, and
+runs attention over feature tokens.
+
+That premise is the same one behind our B6 target encoding, which is our largest single win — TE
+collapses a lattice cell to one scalar fitted in closed form; the embedding learns it end to end.
+Its value is decorrelation, not strength: 0.96853 solo (below our `C4x`) but max correlation 0.9869
+against a pack that correlates 0.986–0.999 internally. This is the counter-example to our own
+neural-axis finding: MLP → embedding-MLP → RealMLP → FT-Transformer → NODE all bought strength and no
+diversity, because they read the same *representation*. Reading the same structure through a
+different *mechanism* is what pays.
+
+### A note on the public OOF library
+
+`szymonkapiski/s6e8-oof-library-47-models` (now 74 members) publishes aligned OOF+test predictions on
+`StratifiedKFold(5, shuffle=True, random_state=42)` — **byte-identical to our frozen split**, so it
+would stack against our legs with no realignment. Using it is permitted and is what the top of the
+public LB is built from, but it means shipping other people's models, which is a strategy call rather
+than a technical one and is not taken here unilaterally. His warning applies to any such reuse and is
+worth repeating: most public OOF is on a *different* split (7-fold, 10-fold, or seed-averaged across
+three partitions), all of it looks healthy, and **no distributional statistic detects the mismatch** —
+a deliberately leaked model inflates AUC by 0.0054 while moving a KS statistic by 0.0002. Read the
+code for `n_splits` and `random_state`, and check whether `random_state` is a loop variable.
+
 ## Experiment log
 
 `experiments/runs.csv` is append-only and tracked in git — one row per run, with a long free-text

@@ -21,32 +21,42 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.stats import rankdata
 from sklearn.metrics import roc_auc_score
 
 REPO = Path(__file__).resolve().parent.parent
 LEGS = {"B6": "f64e2781", "B7": "6e3dd7c3", "B8": "9e68c7ce", "B10x": "7ebde432",
         "C1": "6a091632", "C2": "5daf6c12", "C3x": "0c32463c", "C4x": "fdeaa047",
         "D1cat": "7c1e9334", "E1mlp": "2fb89920", "E2emb": "8bd89dee",
-        "E3raw": "a594ffe2", "F1real": "53c678f6", "G1ftt": "b2f35b4a",
-        "G2tab": "f1424102"}
-CHAMPION = ["B10x", "C4x", "D1cat", "E2emb", "F1real"]   # shipped ffb65555, LB 0.96892
+        "F1real": "53c678f6", "G1ftt": "b2f35b4a",
+        # newly admitted: the T4 reruns (permitted -- not treated as seed bagging) and
+        # NODE, which is the only leg roughly equidistant from BOTH the tree and neural
+        # axes (3.427% vs trees, 3.245% vs neural) and so is excluded from the 0.965
+        # screening rule on purpose -- that rule was derived from three unrelated legs.
+        "K1real": "cd2dbce4", "K2ftt": "46859c68", "K4node": "976c2703"}
+# G2/K3 TabTransformer (0.9533) and E3 raw-MLP (0.9405) stay out: both are far below the
+# threshold, both measured strictly harmful, and each extra leg doubles the search.
+CHAMPION = ["B10x", "C4x", "D1cat", "E2emb", "F1real"]   # Final A, ffb65555, LB 0.96892
 GATE = 0.0002
 
 
 def fast_auc(y, s):
-    """Mann-Whitney AUC -- one argsort instead of sklearn's full curve machinery."""
-    order = np.argsort(s, kind="stable")
-    ranks = np.empty(len(s), dtype=np.float64)
-    ranks[order] = np.arange(1, len(s) + 1)
-    # average ranks within ties, or ties would bias the statistic
-    s_sorted = s[order]
-    ties = np.flatnonzero(np.diff(s_sorted)) + 1
-    for a, b in zip(np.r_[0, ties], np.r_[ties, len(s)]):
-        if b - a > 1:
-            ranks[order[a:b]] = (a + b + 1) / 2.0
-    n_pos = y.sum()
-    n_neg = len(y) - n_pos
-    return (ranks[y == 1].sum() - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
+    """Mann-Whitney AUC. Ranks via scipy (C-level tie averaging), counts in FLOAT.
+
+    Both details are load-bearing and were wrong in the first version:
+      * n_pos * (n_pos + 1) and n_pos * n_neg overflow numpy int32 on Windows once n is
+        a few hundred thousand (142,000 * 142,001 = 2.0e10 vs int32 max 2.1e9). It wraps
+        SILENTLY and returns a wrong number. Casting to float first is the fix.
+      * the original averaged ties in a Python loop over tie groups, which is O(n)
+        interpreted iterations per call -- it made this no faster than sklearn.
+
+    Validated against roc_auc_score at 200k and 691k rows, i.e. the sizes actually used,
+    not the small ones the first check used.
+    """
+    ranks = rankdata(s)                       # average ranks within ties, in C
+    n_pos = float(y.sum())
+    n_neg = float(len(y)) - n_pos
+    return (float(ranks[y == 1].sum()) - n_pos * (n_pos + 1.0) / 2.0) / (n_pos * n_neg)
 
 
 def main():
