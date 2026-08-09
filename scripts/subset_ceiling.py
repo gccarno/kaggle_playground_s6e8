@@ -39,7 +39,8 @@ LEGS = {"B6": "f64e2781", "B7": "6e3dd7c3", "B8": "9e68c7ce", "B10x": "7ebde432"
         # Lookup-Transformer, the first leg here that is BOTH the strongest solo and the
         # most decorrelated (max corr 0.9796 against a pack whose own median max-corr is
         # 0.9941), which is the counter-example to the section 6 wall.
-        "B2xgb": "f047412f", "B2blgb": "7d1de67e", "L1lookupt": "dada9e2d"}
+        "B2xgb": "f047412f", "B2blgb": "7d1de67e", "B2ccat": "e73f6257",
+        "L1lookupt": "dada9e2d", "M1tabm": "f1d249bd"}
 # G2/K3 TabTransformer (0.9533) and E3 raw-MLP (0.9405) stay out: both are far below the
 # threshold, both measured strictly harmful, and each extra leg doubles the search.
 CHAMPION = ["B10x", "C4x", "D1cat", "E2emb", "F1real"]   # Final A, ffb65555, LB 0.96892
