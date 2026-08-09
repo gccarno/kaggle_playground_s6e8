@@ -868,16 +868,23 @@ decorrelated**, which is the direct counter-example to §6's wall
 tabular models. Reading the same lattice structure through a *different mechanism* buys both at
 once. It takes the largest weight in the 19-leg stack, at +2.337.
 
-### Stage D interim — 19 legs, and the offset predicted itself to 0.00002
+### Stage D — the stack offset is now the most reliable instrument in the repo
 
-| | OOF | LB |
-|---|---|---|
-| equal-weight champion `ffb65555` | 0.967733 | 0.96892 |
-| 16-leg stack `cdbffba5` | 0.967976 | 0.96928 |
-| **19-leg stack `6da97a58`** | **0.969228** | **0.97051** |
+| | OOF | LB | predicted LB | error |
+|---|---|---|---|---|
+| equal-weight champion `ffb65555` | 0.967733 | 0.96892 | — | — |
+| 16-leg stack `cdbffba5` | 0.967976 | 0.96928 | 0.96917 | +0.00011 |
+| 19-leg stack `6da97a58` | 0.969228 | 0.97051 | 0.97053 | −0.00002 |
+| **22-leg stack `0a3c852e`** | **0.969314** | **0.97056** | 0.97060 | −0.00004 |
 
-**Predicted 0.97053 from the offset measured that morning; realised 0.97051.** Eight of the
-nineteen weights are negative. Public LB top was 0.97086 on 2026-08-07.
+**Three pre-registered predictions, three hits, max error 0.00011.** The stack offset is
+`+0.00128 ± 0.000029` over three points — an order of magnitude tighter than the ±0.00053 the
+public bootstrap gives for a single AUC score, because both sides move together. Ten of the
+twenty-two weights are negative. Public LB top was 0.97086 on 2026-08-07.
+
+The last submission is worth reading correctly: **+0.00005 over the previous one, which is below
+the 0.00014 the leaderboard can resolve.** It was submitted so the OOF champion exists as a
+selectable entry at the deadline, not to learn anything. Selection stays on OOF.
 
 ### Where the wall came back: two probes cleared solo and died in the stack
 
