@@ -879,6 +879,59 @@ once. It takes the largest weight in the 19-leg stack, at +2.337.
 **Predicted 0.97053 from the offset measured that morning; realised 0.97051.** Eight of the
 nineteen weights are negative. Public LB top was 0.97086 on 2026-08-07.
 
+### Where the wall came back: two probes cleared solo and died in the stack
+
+| probe | solo | vs its twin | stack gain | verdict |
+|---|---|---|---|---|
+| **M1 TabM** | 0.967160 | +0.00106 vs our best neural leg | **+0.000027** (with B2ccat) | miss |
+| **B3 `fe_impute`** | 0.968425 | **+0.000245** vs B2, positive on 5/5 folds | **+0.000059** | miss |
+
+Neither was submitted: the total move since the last submission is +0.000086, and the public
+bootstrap puts the leaderboard's resolution at 0.00014, so a slot would buy a number we could
+not read.
+
+**TabM failed in an informative way.** The pre-registered falsification was "strong but a
+variance-reduced twin of a leg we already own." Instead: its nearest neighbours are all **trees**
+— 0.9867 with the B2 XGBoost, 0.9857 with C1, 0.9847 with C4x — and its solo score is C4x's to
+four decimals. Fed the same target-encoded lattice the trees eat, a packed MLP ensemble
+**re-derived the tree solution**. Publicly TabM is the strongest family after the library
+author's own models; here it is a tree. The representation decides what a model becomes — the
+same lesson the Lookup-Transformer taught from the other side.
+
+**`fe_impute` was worth +0.0012 publicly and +0.000245 here**, and the gap is explicable rather
+than mysterious: that measurement was against a baseline *without* the composition family, and
+coverage for those derived features is the whole mechanism. B2 already bought most of it.
+
+## Stage C — the public library as a measuring instrument (never shipped)
+
+`scripts/public_gap.py`, read-only, on the 74-member public OOF library (verified on our exact
+split). Nothing here was ever an input to a submission.
+
+| honest per-fold logit stack | members | OOF |
+|---|---|---|
+| **ours only** | 21 | **0.969255** |
+| public only | 74 | 0.969661 |
+| union | 95 | 0.969733 |
+
+**Our 21 legs land within 0.0004 of a 74-member public library.** Our legs contribute +0.000072
+to a public-grade stack; the niche we are missing is worth **+0.000478**.
+
+And that niche is essentially *one recipe*. Ranking public members by distance from our pack:
+
+| member | solo | max corr vs ours | nearest leg of ours |
+|---|---|---|---|
+| **`naji05` / `naji03`** | **0.9688** | **0.9566** | `B2ccat` |
+| `pub_tabm` | 0.9675 | 0.9687 | `B2xgb` |
+| `pub_ravi` | 0.9665 | 0.9744 | `K2ftt` |
+| `tabm_imp` | 0.9681 | 0.9811 | `M1tabm` |
+
+For scale, our own legs' median max-correlation is **0.9945**. Two members sit at 0.9566 while
+everything else in a 74-model library sits above 0.968 — and those two are `naji`'s, whose author
+states plainly that the feature engineering and training code are private. **The remaining gap is
+concentrated in a recipe nobody published.** That is a much more useful answer than "build more
+models": it says the redundancy in our own pack (median 0.9945) is the cheaper problem, and that
+copying the public frontier further has almost nothing left to give.
+
 ### Durability problems found while implementing (both fixed)
 
 - **`build_model_nb.py` was untracked**, living only in a session-scoped temp directory, while
