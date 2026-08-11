@@ -868,6 +868,12 @@ decorrelated**, which is the direct counter-example to §6's wall
 tabular models. Reading the same lattice structure through a *different mechanism* buys both at
 once. It takes the largest weight in the 19-leg stack, at +2.337.
 
+> **Corrected by Phase 4.** The credit here belongs to the *representation*, not to the
+> Lookup-Transformer. ModernNCA — a retrieval model sharing no inductive bias with a transformer —
+> reads the same per-value representation and is worth **+0.000530** to a pool with `L1lookupt`
+> removed, against `L1lookupt`'s own **+0.000520**. Either one alone buys ≈ the same thing, and
+> putting both in buys only +0.00064 of a possible +0.00105.
+
 ### Stage D — the stack offset is now the most reliable instrument in the repo
 
 | | OOF | LB | predicted LB | error |
@@ -1047,6 +1053,78 @@ representation*, which is the only mechanism this pack has ever responded to. Ga
 Seven consecutive probes have now landed inside ±0.00007 of the stack: TabM +0.000027, `fe_impute`
 +0.000059, nonlinear meta −0.000042, orphan admission +0.000047, N1 −0.000000, N2 +0.000001,
 N3 +0.000029. Per §8, that is the stop signal, and it is a much sharper one than a single miss.
+
+## Phase 4 — the representation is the unit of ensemble value, not the model
+
+`R1` (`9107a864`) is **ModernNCA** — a retrieval/metric learner that predicts a row by soft k-NN
+over the training set in a learned metric space, `p(y=1|q) = Σⱼ softmax(−‖f(q) − f(xⱼ)‖₂) · yⱼ`.
+It was run for one reason: this data's value→target map is a **lookup table**, and retrieval *is*
+lookup. It reads `L1lookupt`'s per-value representation, and the `mnca` branch is spliced into the
+`lookupt` branch so the vocabulary, rank-gauss and PLR code are shared verbatim — verified as the
+original 119 lines reindented by exactly four spaces, so the two cannot drift apart.
+
+It broke my own pre-registered prediction and still missed the gate:
+
+| | measured | pre-registered |
+|---|---|---|
+| solo OOF | **0.968722** — our strongest leg ever | ≥ 0.9655 ✓ |
+| max \|corr\| vs the pool | **0.9771** (vs `B2blgb`); pool median 0.9947 | — |
+| corr vs `L1lookupt` | **0.9689** | ≥ 0.995, "expect a re-derivation" ✗ |
+| \|weight\| rank in the fitted stack | **1 of 23** | — |
+| **stack contribution** | **+0.000120** | ≥ +0.0002 ✗ |
+
+So it is *simultaneously* the strongest leg we own and more decorrelated than `L1lookupt` was —
+outcome (c), the quadrant §6 says is empty, and the **second** counter-example to the wall. And it
+is still only worth +0.00012. The gate call was right; my reason for expecting it was wrong.
+
+### Why: two unrelated architectures bought the same thing
+
+Removing `L1lookupt` from the pool and adding each leg back alone:
+
+| member set | OOF | Δ |
+|---|---|---|
+| 21 legs (neither lookup leg) | 0.968793 | — |
+| + `L1lookupt` (= the shipped 22) | 0.969314 | +0.000520 |
+| + `R1mnca` **instead** | 0.969323 | **+0.000530** |
+| + **both** | 0.969434 | +0.000641 |
+
+Either lookup leg **alone** is worth ≈ +0.00052. Together they are worth +0.00064, not +0.00105 —
+**64% of their value is the same value.** The marginal is near-symmetric (mnca given L1 +0.000120,
+L1 given mnca +0.000111), so this is not "mnca is redundant"; it is **the second lookup leg is
+redundant, whichever one it is.**
+
+A 4-layer transformer with attention over feature tokens and a soft-kNN metric learner share no
+inductive bias whatsoever. Reading the same per-value representation they deliver the same +0.00052,
+and most of it is the *same* +0.00052. **What `L1lookupt` bought was never "a transformer" — it was
+access to the lookup representation, and that access is now saturated.** This is the generalisation
+of the TabM lesson (§"the representation decides what a model becomes"): the representation is the
+unit of ensemble value, and the architecture on top of it is close to a free variable. A third
+architecture on the same representation is predicted to buy ≈ +0.0001 and must not be run on the
+strength of this result.
+
+### Correlation structure is not value structure
+
+The Phase 3 finding was that a *decorrelated* leg can be worth nothing. This is the same point from
+the other side: two legs correlated at only **0.9689** still share 64% of their contribution. Their
+correlation *profiles* are not even similar —
+
+| | vs `B2blgb` | vs `B2xgb` | vs `F1real` | vs `K4node` |
+|---|---|---|---|---|
+| `R1mnca` | 0.9771 | 0.9749 | **0.8628** | **0.9062** |
+| `L1lookupt` | 0.9633 | 0.9688 | 0.9305 | 0.9536 |
+
+Retrieval reads the lookup lattice roughly the way a **tree** does; the transformer reads it the way
+a **net** does. Different neighbours, nearly the same value. Correlation is a poor proxy for
+contribution in *both* directions, and only the add-one measurement settles it —
+`scripts/leg_probe.py <run_id>` now does that in one command.
+
+**Zero submissions on this probe's own terms.** Whether the 23-leg stack (OOF **0.969434**) is worth
+a slot is a separate finals-selection question on the `0a3c852e` precedent — predicted LB 0.97071
+against the standing 0.97056, i.e. +0.00015 against a leaderboard resolution of 0.00014.
+
+**Not run, and the one open question:** `mnca` on rank-gauss *scalars* instead of the per-value
+embedding, which would attribute the above to the representation directly. Prediction pre-registered
+before `R1` ran and unchanged: solo ≈ 0.966, max corr > 0.995, contribution ≈ 0.
 
 ## Experiment log
 

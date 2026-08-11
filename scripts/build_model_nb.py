@@ -58,7 +58,7 @@ COMP = "playground-series-s6e8"
 # ---- everything a probe is allowed to change ------------------------------
 DEFAULTS = {
     "run_tag":       "champion",
-    "learner":       "lgb",        # lgb | xgb | cat | mlp | realmlp | tabm | ftt | tabtf | node | lookupt
+    "learner":       "lgb",        # lgb | xgb | cat | mlp | realmlp | tabm | ftt | tabtf | node | lookupt | mnca
     "model_seed":    42,           # model randomness ONLY -- never the CV split seed
     "fe_interaction": False,       # B1: opens_per_hour, notif_per_hour, notif_per_open
     "fe_composition": False,       # B2: other_hours, share_*, weekend_ratio, screen_total
@@ -622,7 +622,7 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
         n_emb = sum(d for _, _, d in emb_spec)
         print(f"    mlp: {Ttr.shape[1]}+{n_emb} in, best epoch {best_ep} "
               f"(val AUC {best_auc:.6f}), dev={dev}", flush=True)
-    elif CFG["learner"] == "lookupt":
+    elif CFG["learner"] in ("lookupt", "mnca"):
         # LOOKUP-TRANSFORMER. Architecture from tamerlanomralinov's public S6E8 notebook,
         # retrained here on OUR frozen 5-fold split (his uses 10, so his published OOF is
         # fitted on a different partition and would leak if stacked -- the architecture
@@ -657,7 +657,8 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
         # budget columns are continuous and get PLR tokens only. te_cols must be empty for
         # this learner -- the embedding IS the lookup, so a target encoding on top would be
         # the same structure read twice and would recorrelate this leg with the tree pack.
-        assert not TE_COLS, "lookupt: set te_cols=[] -- the embedding already IS the lookup"
+        assert not TE_COLS, (f"{CFG['learner']}: set te_cols=[] -- "
+                             "the embedding already IS the lookup")
         LOOK_NUM = [c for c in RAW_NUM if c in FEATURES]
         LOOK_CAT = list(cat_cols)
         PLR_ONLY = [c for c in FEATURES if c not in LOOK_NUM + LOOK_CAT]
@@ -747,125 +748,338 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
                 z = torch.cat([torch.sin(z), torch.cos(z)], -1)
                 return torch.einsum("bfk,fkd->bfd", z, self.w) + self.b
 
-        class LookupTransformer(nn.Module):
-            def __init__(self):
-                super().__init__()
-                d = hp["d"]
-                self.emb = nn.Embedding(LOOK_TOTV, d)
-                nn.init.normal_(self.emb.weight, std=0.02)
-                self.plr_n = PLR(NNUM, hp["k"], d) if NNUM else None
-                self.plr_d = PLR(NDER, hp["k"], d) if NDER else None
-                self.cls = nn.Parameter(torch.zeros(1, 1, d))
-                self.pos = nn.Parameter(torch.randn(1, 1 + NLOOK + NDER, d) * 0.02)
-                self.edrop = nn.Dropout(hp["drop"])
-                enc = nn.TransformerEncoderLayer(d, hp["heads"], d * 2, hp["drop"],
-                                                 activation="gelu", batch_first=True,
-                                                 norm_first=True)
-                self.tr = nn.TransformerEncoder(enc, hp["layers"])
-                self.head = nn.Sequential(nn.LayerNorm(d), nn.Linear(d, d), nn.GELU(),
-                                          nn.Dropout(hp["drop"]), nn.Linear(d, 1))
-            def forward(self, idx, cn, cm, dn, dm):
-                B = idx.shape[0]
-                # Built by concatenation rather than in-place assignment into emb(idx):
-                # an in-place write into a tensor that requires grad is an autograd hazard
-                # for no gain here.
-                tok = self.emb(idx)
-                if self.plr_n is not None:
-                    # Missing -> the smooth term is switched OFF and only Embedding[0]
-                    # remains, i.e. a learned per-column "missing" vector.
-                    smooth = self.plr_n(cn) * (1 - cm).unsqueeze(-1)
-                    tok = torch.cat([tok[:, :NNUM] + smooth, tok[:, NNUM:]], 1)
-                parts = [self.cls.expand(B, -1, -1), tok]
-                if self.plr_d is not None:
-                    parts.append(self.plr_d(dn) * (1 - dm).unsqueeze(-1))
-                t = torch.cat(parts, 1) + self.pos
-                return self.head(self.tr(self.edrop(t))[:, 0]).squeeze(-1)
+        if CFG["learner"] == "lookupt":
+            class LookupTransformer(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    d = hp["d"]
+                    self.emb = nn.Embedding(LOOK_TOTV, d)
+                    nn.init.normal_(self.emb.weight, std=0.02)
+                    self.plr_n = PLR(NNUM, hp["k"], d) if NNUM else None
+                    self.plr_d = PLR(NDER, hp["k"], d) if NDER else None
+                    self.cls = nn.Parameter(torch.zeros(1, 1, d))
+                    self.pos = nn.Parameter(torch.randn(1, 1 + NLOOK + NDER, d) * 0.02)
+                    self.edrop = nn.Dropout(hp["drop"])
+                    enc = nn.TransformerEncoderLayer(d, hp["heads"], d * 2, hp["drop"],
+                                                     activation="gelu", batch_first=True,
+                                                     norm_first=True)
+                    self.tr = nn.TransformerEncoder(enc, hp["layers"])
+                    self.head = nn.Sequential(nn.LayerNorm(d), nn.Linear(d, d), nn.GELU(),
+                                              nn.Dropout(hp["drop"]), nn.Linear(d, 1))
+                def forward(self, idx, cn, cm, dn, dm):
+                    B = idx.shape[0]
+                    # Built by concatenation rather than in-place assignment into emb(idx):
+                    # an in-place write into a tensor that requires grad is an autograd hazard
+                    # for no gain here.
+                    tok = self.emb(idx)
+                    if self.plr_n is not None:
+                        # Missing -> the smooth term is switched OFF and only Embedding[0]
+                        # remains, i.e. a learned per-column "missing" vector.
+                        smooth = self.plr_n(cn) * (1 - cm).unsqueeze(-1)
+                        tok = torch.cat([tok[:, :NNUM] + smooth, tok[:, NNUM:]], 1)
+                    parts = [self.cls.expand(B, -1, -1), tok]
+                    if self.plr_d is not None:
+                        parts.append(self.plr_d(dn) * (1 - dm).unsqueeze(-1))
+                    t = torch.cat(parts, 1) + self.pos
+                    return self.head(self.tr(self.edrop(t))[:, 0]).squeeze(-1)
 
-        net = LookupTransformer().to(dev)
-        embp = [p for n_, p in net.named_parameters() if n_.startswith("emb")]
-        rest = [p for n_, p in net.named_parameters() if not n_.startswith("emb")]
-        # Heavier decay on the lookup tables: they are the part with one free vector per
-        # observed value and so the part that overfits.
-        opt = torch.optim.AdamW([{"params": rest, "weight_decay": hp["wd"]},
-                                 {"params": embp, "weight_decay": hp["wd_emb"]}], lr=hp["lr"])
-        nstep = math.ceil(len(itr) / hp["batch"]) * hp["epochs"] + 10
-        sched = torch.optim.lr_scheduler.OneCycleLR(opt, hp["lr"], total_steps=nstep,
-                                                   pct_start=0.15)
-        lossf = nn.BCEWithLogitsLoss()
+            net = LookupTransformer().to(dev)
+            embp = [p for n_, p in net.named_parameters() if n_.startswith("emb")]
+            rest = [p for n_, p in net.named_parameters() if not n_.startswith("emb")]
+            # Heavier decay on the lookup tables: they are the part with one free vector per
+            # observed value and so the part that overfits.
+            opt = torch.optim.AdamW([{"params": rest, "weight_decay": hp["wd"]},
+                                     {"params": embp, "weight_decay": hp["wd_emb"]}], lr=hp["lr"])
+            nstep = math.ceil(len(itr) / hp["batch"]) * hp["epochs"] + 10
+            sched = torch.optim.lr_scheduler.OneCycleLR(opt, hp["lr"], total_steps=nstep,
+                                                       pct_start=0.15)
+            lossf = nn.BCEWithLogitsLoss()
 
-        G = [t.to(dev) for t in Ptr]
-        ytr_d = ytr_t.to(dev)
-        OFFT = torch.from_numpy(np.array(
-            [LOOK_VOCAB[c][1] for c in LOOK_NUM + LOOK_CAT], dtype="int64")).to(dev)
-        P_ = list(net.parameters())
-        ema = [p.detach().clone() for p in P_]
+            G = [t.to(dev) for t in Ptr]
+            ytr_d = ytr_t.to(dev)
+            OFFT = torch.from_numpy(np.array(
+                [LOOK_VOCAB[c][1] for c in LOOK_NUM + LOOK_CAT], dtype="int64")).to(dev)
+            P_ = list(net.parameters())
+            ema = [p.detach().clone() for p in P_]
 
-        def infer(pk, chunk=16384):
-            net.eval(); out = []
+            def infer(pk, chunk=16384):
+                net.eval(); out = []
+                with torch.no_grad():
+                    for i in range(0, len(pk[0]), chunk):
+                        out.append(torch.sigmoid(net(*[t[i:i+chunk].to(dev) for t in pk])
+                                                 ).float().cpu().numpy())
+                return np.concatenate(out)
+
+            best_auc, best_w, best_ep, since = -1.0, None, 0, 0
+            ntr = len(itr)
+            # Skip validation over the first few epochs (the EMA is still cold and it costs a
+            # full inference pass), but never skip ALL of them -- a short run must still leave
+            # best_w set or the load-best below unpacks None.
+            eval_from = min(4, hp["epochs"] - 1)
+            for ep in range(hp["epochs"]):
+                net.train()
+                perm = torch.randperm(ntr, device=dev)
+                for i in range(0, ntr, hp["batch"]):
+                    sl = perm[i:i+hp["batch"]]
+                    idx, cm = G[0][sl].clone(), G[2][sl].clone()
+                    if hp["aug"] > 0:
+                        # Hide extra values at random so the net sees every missingness
+                        # pattern, not only the ones train happens to contain. Dropped cells
+                        # map to their column's id 0, which is the learned "missing" vector.
+                        drop = torch.rand(idx.shape, device=dev) < hp["aug"]
+                        idx = torch.where(drop, OFFT.expand_as(idx), idx)
+                        cm[:, :NNUM] = torch.maximum(cm[:, :NNUM], drop[:, :NNUM].float())
+                    opt.zero_grad(set_to_none=True)
+                    loss = lossf(net(idx, G[1][sl], cm, G[3][sl], G[4][sl]), ytr_d[sl])
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(P_, 1.0)
+                    opt.step(); sched.step()
+                    with torch.no_grad():
+                        torch._foreach_mul_(ema, 0.999)
+                        torch._foreach_add_(ema, [p.detach() for p in P_], alpha=0.001)
+                if ep >= eval_from:
+                    # Validate the EMA copy, on ROC AUC -- the metric, never a loss proxy.
+                    bak = [p.detach().clone() for p in P_]
+                    with torch.no_grad():
+                        for p, e in zip(P_, ema): p.copy_(e)
+                    a = roc_auc_score(y[iva], infer(Pva))
+                    if a > best_auc:
+                        best_auc, best_ep, since = a, ep, 0
+                        best_w = [e.detach().clone() for e in ema]
+                    else:
+                        since += 1
+                    with torch.no_grad():
+                        for p, b_ in zip(P_, bak): p.copy_(b_)
+                    print(f"    lookupt f{k} ep{ep:3d} val {a:.6f} best {best_auc:.6f}", flush=True)
+                    if since >= hp["patience"]:
+                        break
             with torch.no_grad():
-                for i in range(0, len(pk[0]), chunk):
-                    out.append(torch.sigmoid(net(*[t[i:i+chunk].to(dev) for t in pk])
-                                             ).float().cpu().numpy())
-            return np.concatenate(out)
+                for p, e in zip(P_, best_w): p.copy_(e)
 
-        best_auc, best_w, best_ep, since = -1.0, None, 0, 0
-        ntr = len(itr)
-        # Skip validation over the first few epochs (the EMA is still cold and it costs a
-        # full inference pass), but never skip ALL of them -- a short run must still leave
-        # best_w set or the load-best below unpacks None.
-        eval_from = min(4, hp["epochs"] - 1)
-        for ep in range(hp["epochs"]):
-            net.train()
-            perm = torch.randperm(ntr, device=dev)
-            for i in range(0, ntr, hp["batch"]):
-                sl = perm[i:i+hp["batch"]]
-                idx, cm = G[0][sl].clone(), G[2][sl].clone()
-                if hp["aug"] > 0:
-                    # Hide extra values at random so the net sees every missingness
-                    # pattern, not only the ones train happens to contain. Dropped cells
-                    # map to their column's id 0, which is the learned "missing" vector.
-                    drop = torch.rand(idx.shape, device=dev) < hp["aug"]
+            class _WrapL:
+                def __init__(self, va, te): self.va, self.te = va, te
+                def predict_proba(self, X_):
+                    p = self.va if len(X_) == len(Xva) else self.te
+                    return np.column_stack([1 - p, p])
+            model = _WrapL(infer(Pva), infer(Pte))
+            best_it = best_ep
+            del G
+            if dev == "cuda":
+                torch.cuda.empty_cache()
+            print(f"    lookupt: {1 + NLOOK + NDER} tokens, best epoch {best_ep} "
+                  f"(val AUC {best_auc:.6f}), dev={dev}", flush=True)
+
+        else:
+            # ---- ModernNCA: RETRIEVAL instead of function approximation -------------
+            # ModernNCA (Ye et al., ICLR 2025, "Revisiting Nearest Neighbor for Tabular
+            # Data") predicts a row by soft k-NN over the training set in a LEARNED
+            # metric space:
+            #
+            #     p(y=1 | q) = sum_j softmax_j( -|| f(q) - f(x_j) ||_2 ) * y_j
+            #
+            # WHY IT IS RUN ON *THIS* REPRESENTATION AND NOT ON SCALED NUMERICS, which is
+            # the entire experiment. Everything above this line is shared verbatim with
+            # L1lookupt -- same vocabulary, same rank-gauss, same PLR companion, built by
+            # the same code so the two CANNOT drift apart. The only thing that differs is
+            # what sits on top of the representation.
+            #
+            # This repo's central EDA finding is that the value->target map is a LOOKUP
+            # TABLE (rates 0.119-0.986, Pearson(value, rate) = -0.044, only 47.8% of
+            # consecutive steps increasing), and retrieval IS lookup -- but only if the
+            # metric encodes value IDENTITY. Fed rank-gauss scalars, "near in value" is
+            # near in the metric, which is precisely the wrong geometry for a
+            # non-monotone lattice, and is the same reason B1/N2's ratios failed: a
+            # monotone transform cannot represent a lookup. Fed the per-value embedding,
+            # retrieval operates in a space where the lookup structure IS the geometry.
+            #
+            # M1 TabM is the cautionary case and the reason this is worth exactly one
+            # run: fed the TREE representation, a packed MLP ensemble re-derived the tree
+            # solution (nearest neighbours 0.9847-0.9867 with the trees, solo score equal
+            # to C4x's to four decimals). The representation decides what a model becomes.
+            class NCAEncoder(nn.Module):
+                # Deliberately SHALLOW. ModernNCA's own finding is that the retrieval does
+                # the work and a deep encoder only overfits the metric -- which is also
+                # why this is not merely "L1lookupt with a kNN head bolted on".
+                def __init__(self):
+                    super().__init__()
+                    d = hp["d"]
+                    self.emb = nn.Embedding(LOOK_TOTV, d)
+                    nn.init.normal_(self.emb.weight, std=0.02)
+                    self.plr_n = PLR(NNUM, hp["k"], d) if NNUM else None
+                    self.plr_d = PLR(NDER, hp["k"], d) if NDER else None
+                    self.edrop = nn.Dropout(hp["drop"])
+                    self.mlp = nn.Sequential(
+                        nn.Linear((NLOOK + NDER) * d, hp["hidden"]),
+                        nn.BatchNorm1d(hp["hidden"]), nn.ReLU(), nn.Dropout(hp["drop"]),
+                        nn.Linear(hp["hidden"], hp["dout"]))
+                def forward(self, idx, cn, cm, dn, dm):
+                    tok = self.emb(idx)
+                    if self.plr_n is not None:
+                        smooth = self.plr_n(cn) * (1 - cm).unsqueeze(-1)
+                        tok = torch.cat([tok[:, :NNUM] + smooth, tok[:, NNUM:]], 1)
+                    parts = [tok]
+                    if self.plr_d is not None:
+                        parts.append(self.plr_d(dn) * (1 - dm).unsqueeze(-1))
+                    return self.mlp(self.edrop(torch.cat(parts, 1)).flatten(1))
+
+            # A FINITE sentinel, not -inf: the streaming log-sum-exp below evaluates
+            # exp(m - m) on an all-masked block, and -inf would turn that into NaN.
+            NEG = -1e30
+
+            def _lse(m, s, blk):
+                # Running (max, sum) update for a log-sum-exp accumulated over blocks.
+                nm = torch.maximum(m, blk.max(1).values)
+                e = torch.where(blk > NEG / 2, (blk - nm.unsqueeze(1)).exp(),
+                                torch.zeros_like(blk))
+                return nm, s * torch.exp(m - nm) + e.sum(1)
+
+            def nca_logp(zq, zc, yc, mask=None):
+                # (log p1, log p0) for queries zq against the candidate bank zc.
+                #
+                # Distances are EUCLIDEAN, not squared. That is ModernNCA's reported
+                # choice and it is load-bearing: squaring makes the softmax far peakier
+                # and collapses the neighbourhood towards a hard 1-NN.
+                sc = -torch.cdist(zq, zc)
+                if mask is not None:
+                    sc = sc.masked_fill(mask, NEG)
+                yb = yc.unsqueeze(0) > 0.5
+                allz = torch.logsumexp(sc, 1)
+                pos = torch.logsumexp(torch.where(yb, sc, torch.full_like(sc, NEG)), 1)
+                neg = torch.logsumexp(torch.where(yb, torch.full_like(sc, NEG), sc), 1)
+                return pos - allz, neg - allz
+
+            hp = {"d": 64, "k": 24, "hidden": 512, "dout": 128, "drop": 0.1,
+                  "batch": 1024, "cand": 16384, "eval_cand": 65536, "epochs": 20,
+                  "lr": 2e-3, "aug": 0.10, "wd_emb": 3e-4, "wd": 1e-5, "patience": 4,
+                  **CFG["lgb_params"]}
+
+            net = NCAEncoder().to(dev)
+            embp = [p for n_, p in net.named_parameters() if n_.startswith("emb")]
+            rest = [p for n_, p in net.named_parameters() if not n_.startswith("emb")]
+            # Same split as the transformer above: heavier decay on the per-value tables,
+            # which are the part with one free vector per observed value.
+            opt = torch.optim.AdamW([{"params": rest, "weight_decay": hp["wd"]},
+                                     {"params": embp, "weight_decay": hp["wd_emb"]}],
+                                    lr=hp["lr"])
+            nstep = math.ceil(len(itr) / hp["batch"]) * hp["epochs"] + 10
+            sched = torch.optim.lr_scheduler.OneCycleLR(opt, hp["lr"],
+                                                        total_steps=nstep, pct_start=0.15)
+            G = [t.to(dev) for t in Ptr]
+            ytr_d = torch.from_numpy(y[itr].astype("float32")).to(dev)
+            OFFT = torch.from_numpy(np.array(
+                [LOOK_VOCAB[c][1] for c in LOOK_NUM + LOOK_CAT], dtype="int64")).to(dev)
+            P_ = list(net.parameters())
+            ema = [p.detach().clone() for p in P_]
+            ntr = len(itr)
+
+            def enc(sl, aug):
+                idx, cm = G[0][sl], G[2][sl]
+                if aug > 0:
+                    idx, cm = idx.clone(), cm.clone()
+                    drop = torch.rand(idx.shape, device=dev) < aug
                     idx = torch.where(drop, OFFT.expand_as(idx), idx)
                     cm[:, :NNUM] = torch.maximum(cm[:, :NNUM], drop[:, :NNUM].float())
-                opt.zero_grad(set_to_none=True)
-                loss = lossf(net(idx, G[1][sl], cm, G[3][sl], G[4][sl]), ytr_d[sl])
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(P_, 1.0)
-                opt.step(); sched.step()
-                with torch.no_grad():
-                    torch._foreach_mul_(ema, 0.999)
-                    torch._foreach_add_(ema, [p.detach() for p in P_], alpha=0.001)
-            if ep >= eval_from:
-                # Validate the EMA copy, on ROC AUC -- the metric, never a loss proxy.
-                bak = [p.detach().clone() for p in P_]
-                with torch.no_grad():
-                    for p, e in zip(P_, ema): p.copy_(e)
-                a = roc_auc_score(y[iva], infer(Pva))
-                if a > best_auc:
-                    best_auc, best_ep, since = a, ep, 0
-                    best_w = [e.detach().clone() for e in ema]
-                else:
-                    since += 1
-                with torch.no_grad():
-                    for p, b_ in zip(P_, bak): p.copy_(b_)
-                print(f"    lookupt f{k} ep{ep:3d} val {a:.6f} best {best_auc:.6f}", flush=True)
-                if since >= hp["patience"]:
-                    break
-        with torch.no_grad():
-            for p, e in zip(P_, best_w): p.copy_(e)
+                return net(idx, G[1][sl], cm, G[3][sl], G[4][sl])
 
-        class _WrapL:
-            def __init__(self, va, te): self.va, self.te = va, te
-            def predict_proba(self, X_):
-                p = self.va if len(X_) == len(Xva) else self.te
-                return np.column_stack([1 - p, p])
-        model = _WrapL(infer(Pva), infer(Pte))
-        best_it = best_ep
-        del G
-        if dev == "cuda":
-            torch.cuda.empty_cache()
-        print(f"    lookupt: {1 + NLOOK + NDER} tokens, best epoch {best_ep} "
-              f"(val AUC {best_auc:.6f}), dev={dev}", flush=True)
+            @torch.no_grad()
+            def encode(pk, chunk=16384):
+                net.eval()
+                return torch.cat([net(*[t[i:i+chunk].to(dev) for t in pk])
+                                  for i in range(0, len(pk[0]), chunk)])
+
+            @torch.no_grad()
+            def nca_predict(pk, ZC, YC, qchunk=2048, cchunk=65536):
+                # Soft-kNN probability, streamed over candidate blocks. Materialising the
+                # full (n_query x n_train) score matrix would be ~300 GB at inference; a
+                # running (max, sum) pair is mathematically identical and needs only
+                # (qchunk x cchunk).
+                net.eval()
+                out = []
+                for i in range(0, len(pk[0]), qchunk):
+                    zq = net(*[t[i:i+qchunk].to(dev) for t in pk])
+                    n = len(zq)
+                    mA = torch.full((n,), NEG, device=dev); sA = torch.zeros(n, device=dev)
+                    mP = torch.full((n,), NEG, device=dev); sP = torch.zeros(n, device=dev)
+                    for j in range(0, len(ZC), cchunk):
+                        sc = -torch.cdist(zq, ZC[j:j+cchunk])
+                        yb = YC[j:j+cchunk].unsqueeze(0) > 0.5
+                        mA, sA = _lse(mA, sA, sc)
+                        mP, sP = _lse(mP, sP,
+                                      torch.where(yb, sc, torch.full_like(sc, NEG)))
+                    out.append(torch.exp((mP + sP.log()) - (mA + sA.log()))
+                               .float().cpu().numpy())
+                return np.concatenate(out)
+
+            # A FIXED evaluation bank, drawn once. A bank resampled per epoch would make
+            # the monitored AUC move for a reason that is not the model.
+            eval_idx = torch.randperm(
+                ntr, generator=torch.Generator().manual_seed(SEED))[:min(hp["eval_cand"], ntr)]
+            Pev, yev = [t[eval_idx] for t in Ptr], ytr_d[eval_idx.to(dev)]
+
+            best_auc, best_w, best_ep, since = -1.0, None, 0, 0
+            eval_from = min(3, hp["epochs"] - 1)
+            for ep in range(hp["epochs"]):
+                net.train()
+                perm = torch.randperm(ntr, device=dev)
+                for i in range(0, ntr, hp["batch"]):
+                    sl = perm[i:i+hp["batch"]]
+                    # Candidates are RESAMPLED every step. This is ModernNCA's scalability
+                    # trick: the retrieval target is the whole training fold, and a fresh
+                    # random subset per step is an unbiased view of it that keeps the
+                    # (B x C) distance matrix resident. 16,384 of ~553k is ~3%.
+                    cd = torch.randint(0, ntr, (hp["cand"],), device=dev)
+                    zq, zc = enc(sl, hp["aug"]), enc(cd, hp["aug"])
+                    # Self-retrieval would let a row read its OWN label -- the NCA form of
+                    # a target leak. Masked explicitly rather than assumed rare.
+                    lp1, lp0 = nca_logp(zq, zc, ytr_d[cd],
+                                        sl.unsqueeze(1) == cd.unsqueeze(0))
+                    yq = ytr_d[sl]
+                    loss = -(yq * lp1 + (1 - yq) * lp0).mean()
+                    opt.zero_grad(set_to_none=True)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(P_, 1.0)
+                    opt.step(); sched.step()
+                    with torch.no_grad():
+                        torch._foreach_mul_(ema, 0.999)
+                        torch._foreach_add_(ema, [p.detach() for p in P_], alpha=0.001)
+                if ep >= eval_from:
+                    bak = [p.detach().clone() for p in P_]
+                    with torch.no_grad():
+                        for p, e in zip(P_, ema): p.copy_(e)
+                    # Monitored on ROC AUC -- the metric, never the NCA loss as a proxy.
+                    a = roc_auc_score(y[iva], nca_predict(Pva, encode(Pev), yev))
+                    if a > best_auc:
+                        best_auc, best_ep, since = a, ep, 0
+                        best_w = [e.detach().clone() for e in ema]
+                    else:
+                        since += 1
+                    with torch.no_grad():
+                        for p, b_ in zip(P_, bak): p.copy_(b_)
+                    print(f"    mnca f{k} ep{ep:3d} val {a:.6f} best {best_auc:.6f}",
+                          flush=True)
+                    if since >= hp["patience"]:
+                        break
+            with torch.no_grad():
+                for p, e in zip(P_, best_w): p.copy_(e)
+
+            class _WrapN:
+                def __init__(self, va, te): self.va, self.te = va, te
+                def predict_proba(self, X_):
+                    p = self.va if len(X_) == len(Xva) else self.te
+                    return np.column_stack([1 - p, p])
+
+            # The FINAL artifacts retrieve over the ENTIRE training fold, which is
+            # ModernNCA as published. The 65k-candidate bank above was used only to pick
+            # the epoch and never produces a number this repo quotes.
+            ZC = encode(Ptr)
+            model = _WrapN(nca_predict(Pva, ZC, ytr_d), nca_predict(Pte, ZC, ytr_d))
+            best_it = best_ep
+            del G, ZC
+            if dev == "cuda":
+                torch.cuda.empty_cache()
+            print(f"    mnca: {NLOOK + NDER} tokens -> d{hp['dout']} metric, "
+                  f"{hp['cand']:,} candidates per step, {ntr:,} at inference, "
+                  f"best epoch {best_ep} (val AUC {best_auc:.6f}), dev={dev}", flush=True)
     elif CFG["learner"] in ("realmlp", "tabm"):
         # RealMLP (pytabkit) -- the strongest published tabular-NN baseline, and NOT a
         # reshaped version of our own MLP: it brings periodic-linear (PLR) numeric
