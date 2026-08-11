@@ -888,6 +888,11 @@ once. It takes the largest weight in the 19-leg stack, at +2.337.
 public bootstrap gives for a single AUC score, because both sides move together. Ten of the
 twenty-two weights are negative. Public LB top was 0.97086 on 2026-08-07.
 
+> **Corrected by the fourth point.** The offset is **not a constant** — it decays monotonically
+> with pool size, and reading three points on a slope as `0.00128 ± 0.000029` was wrong. The
+> fourth submission fell 3.8σ below that mean. See **§ Phase 5**; the header claim above
+> ("the most reliable instrument in the repo") no longer holds in the form it was written.
+
 The last submission is worth reading correctly: **+0.00005 over the previous one, which is below
 the 0.00014 the leaderboard can resolve.** It was submitted so the OOF champion exists as a
 selectable entry at the deadline, not to learn anything. Selection stays on OOF.
@@ -1118,13 +1123,62 @@ a **net** does. Different neighbours, nearly the same value. Correlation is a po
 contribution in *both* directions, and only the add-one measurement settles it —
 `scripts/leg_probe.py <run_id>` now does that in one command.
 
-**Zero submissions on this probe's own terms.** Whether the 23-leg stack (OOF **0.969434**) is worth
-a slot is a separate finals-selection question on the `0a3c852e` precedent — predicted LB 0.97071
-against the standing 0.97056, i.e. +0.00015 against a leaderboard resolution of 0.00014.
+**Zero submissions on this probe's own terms.** The 23-leg stack (OOF **0.969434**) was submitted
+afterwards as `7f69fcf6` on the `0a3c852e` precedent — a finals-selection call, not a gate
+clearance. It landed at **LB 0.97060**, and what that number revealed is § Phase 5.
 
 **Not run, and the one open question:** `mnca` on rank-gauss *scalars* instead of the per-value
 embedding, which would attribute the above to the representation directly. Prediction pre-registered
 before `R1` ran and unchanged: solo ≈ 0.966, max corr > 0.995, contribution ≈ 0.
+
+## Phase 5 — the CV→LB offset is not a constant, and the gate has been deflating
+
+`7f69fcf6` (23 legs) was submitted to give the OOF champion a selectable entry at the deadline. It
+predicted LB 0.97071 and landed at **0.97060** — the first pre-registered stack prediction to miss,
+by 0.00011, and the fourth point is what makes the series readable:
+
+| stack | OOF | LB | offset = LB − OOF |
+|---|---|---|---|
+| 16 legs `cdbffba5` | 0.967976 | 0.96928 | 0.001304 |
+| 19 legs `6da97a58` | 0.969228 | 0.97051 | 0.001282 |
+| 22 legs `0a3c852e` | 0.969314 | 0.97056 | 0.001246 |
+| **23 legs `7f69fcf6`** | **0.969434** | **0.97060** | **0.001166** |
+
+The offset **decays monotonically with pool size**. The first three were read as a constant
+`0.00128 ± 0.000029`; they were three points on a slope, and the fourth sits 3.8σ below their mean.
+
+A falling offset means the OOF is becoming progressively more **optimistic** as legs are added —
+exactly what a fitted meta-model does. More members, more parameters, more fit to the noise in the
+OOF matrix. `honest_oof`'s per-outer-fold refit does not remove it, because every leg's OOF was
+itself produced on this same partition (the residual optimism flagged at `stack_logit.py:22`, now
+measured rather than assumed).
+
+### The operational form: transfer ratio
+
+| step | ΔOOF | ΔLB | transferred |
+|---|---|---|---|
+| 16 → 19 legs | +0.001252 | +0.001230 | **98%** |
+| 19 → 22 legs | +0.000086 | +0.000050 | 58% |
+| 22 → 23 legs | +0.000120 | +0.000040 | **33%** |
+
+The one large genuine gain transferred essentially in full. The marginal gains transfer
+progressively less.
+
+**This changes what the gate means.** The +0.0002 gate is stated in OOF units and has been read
+throughout as though OOF units were LB units. At the current pool size a leg that exactly clears it
+is worth about **+0.00007 on the leaderboard — half the leaderboard's own resolution.** The gate was
+not set too low; OOF and LB simply stopped being the same currency somewhere around 20 legs, and
+nobody noticed because until now every prediction had landed. Judge any future leg on
+*OOF contribution × the current transfer ratio*, and on that arithmetic **no single additional leg
+of the kind we know how to build can move this leaderboard.**
+
+It also retrospectively vindicates the `R1mnca` gate-2 miss: the gate said the leg was not worth
+shipping, the leaderboard agreed to within a number too small to read, and the submission was
+correctly framed as selection rather than as evidence.
+
+**Standing:** `7f69fcf6` (23 legs, OOF 0.969434, **LB 0.97060**) is now both the OOF and the LB
+champion, so Final A carries no conflict between the two criteria — but it beats `0a3c852e` by
+0.00004 against a resolution of 0.00014. The two are tied; prefer the 23-leg on OOF.
 
 ## Experiment log
 
