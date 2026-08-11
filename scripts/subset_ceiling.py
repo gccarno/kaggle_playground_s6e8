@@ -41,8 +41,15 @@ LEGS = {"B6": "f64e2781", "B7": "6e3dd7c3", "B8": "9e68c7ce", "B10x": "7ebde432"
         # 0.9941), which is the counter-example to the section 6 wall.
         "B2xgb": "f047412f", "B2blgb": "7d1de67e", "B2ccat": "e73f6257",
         "L1lookupt": "dada9e2d", "M1tabm": "f1d249bd", "B3imp": "54db2990"}
-# G2/K3 TabTransformer (0.9533) and E3 raw-MLP (0.9405) stay out: both are far below the
-# threshold, both measured strictly harmful, and each extra leg doubles the search.
+# G2/K3 TabTransformer (0.9533) and E3 raw-MLP (0.9405) stay out. The original reason given
+# here -- "measured strictly harmful" -- was measured under an EQUAL-WEIGHT MEAN, where a weak
+# leg can only dilute; it is not evidence about a fitted combiner, which can subtract. They
+# have since been re-measured under the fitted logit stack by scripts/leg_diversity.py, along
+# with the other six Phase 1 orphans, and they still do not belong: G2 and K3 each contribute
+# -0.000001 and E3 +0.000008, all nine together +0.000047, a quarter of the gate. K3 is worth
+# singling out because it has max corr 0.9251 against a pool whose median is 0.9947 -- the most
+# decorrelated leg we own, contributing nothing. Decorrelation is not sufficient; strength is
+# the binding constraint. Keeping them out ALSO keeps this search tractable: each leg doubles it.
 CHAMPION = ["B10x", "C4x", "D1cat", "E2emb", "F1real"]   # Final A, ffb65555, LB 0.96892
 GATE = 0.0002
 

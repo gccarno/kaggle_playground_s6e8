@@ -936,8 +936,12 @@ For scale, our own legs' median max-correlation is **0.9945**. Two members sit a
 everything else in a 74-model library sits above 0.968 — and those two are `naji`'s, whose author
 states plainly that the feature engineering and training code are private. **The remaining gap is
 concentrated in a recipe nobody published.** That is a much more useful answer than "build more
-models": it says the redundancy in our own pack (median 0.9945) is the cheaper problem, and that
-copying the public frontier further has almost nothing left to give.
+models": copying the public frontier further has almost nothing left to give.
+
+> This section originally closed by calling the redundancy in our own pack (median 0.9945) "the
+> cheaper problem". **That was wrong, and Phase 3 below measures why** — max-correlation turns out
+> not to predict stack contribution at all. The sentence is corrected rather than deleted because
+> the reasoning that produced it is the reasoning worth not repeating.
 
 ### Durability problems found while implementing (both fixed)
 
@@ -950,6 +954,99 @@ copying the public frontier further has almost nothing left to give.
 - `collect_run.py` gained `--accelerator`; the P100 workaround was tribal knowledge until now.
 - C4's Optuna parameters lived only in gitignored `.kaggle_output/`. They are now carried in the
   B2 row's `notes`, which is tracked.
+
+## Phase 3 — max-correlation does not predict stack contribution
+
+Phase 2 closed on an open worry: our 22 legs have a **median max-correlation of 0.9947**, every leg
+has a near-twin, and the one leg that broke the pattern (`L1lookupt`, 0.9796) bought most of the
+gain. The obvious reading was "redundancy is the constraint — reduce it cheaply and the stack
+improves." Phase 3 opened by testing that reading three ways, and it does not survive.
+`scripts/leg_diversity.py` reproduces all of it; nothing below was ever shipped.
+
+| attack | result | what it rules out |
+|---|---|---|
+| LightGBM meta-learner over the 22 leg logits | **−0.000042** | a nonlinear combiner |
+| the same, plus 9 raw features and a missing-count | **−0.000065** | feature-gated / region-switching stacking |
+| tree-mean ↔ neural-mean correlation, by missingness regime | flat at **0.9785–0.9811** | heterogeneity for a gate to switch on |
+| admitting the 9 Phase 1 **orphan legs**, all below 0.9947, free | **+0.000047** total | decorrelation as a goal in itself |
+
+### The orphans, and a rule that expired without anyone noticing
+
+Nine Phase 1 legs sit on disk with complete `oof`+`test` artifacts on the frozen partition. They were
+excluded by `subset_ceiling.py`'s rule that legs below 0.965 solo are "strictly harmful" — a rule
+[measured under an equal-weight mean](#1-we-have-only-ever-built-equal-weight-averages--and-that-is-why-node-looked-useless),
+where a weak leg can only dilute. The fitted stack can subtract, so the rule did not carry over, and
+`K4node` (0.9622 solo, third-largest |weight| in the stack) is the standing proof. Admitting them
+costs nothing, so they were re-measured:
+
+| leg | solo | max corr vs pool | contribution to the 22-leg stack |
+|---|---|---|---|
+| **`K3tabtf`** | 0.9533 | **0.9251** | **−0.000001** |
+| `G2tabtf` | 0.9541 | 0.9311 | −0.000001 |
+| `E3raw` | 0.9405 | 0.9505 | +0.000008 |
+| `D2numcat` | 0.9623 | 0.9717 | **+0.000030** — the largest |
+| `D2blookup` | 0.9645 | 0.9874 | +0.000015 |
+| `v1anchor`, `A1seed`, `B1inter`, `A2es400` | ~0.963 | ~0.978 | −0.000001 … +0.000001 |
+| **all nine together** | | | **+0.000047** |
+
+`K3tabtf` is the finding. At max correlation **0.9251** against a pool whose median is 0.9947 it is
+by a wide margin the most decorrelated thing we own, and it contributes **−0.000001** — because
+0.015 AUC below the pack is noise, however uncorrelated that noise is.
+
+**So max-correlation does not predict stack contribution, and the §6 framing needs one more turn of
+the screw.** `L1lookupt` did not pay because it was decorrelated; it paid because it was
+simultaneously our **strongest** leg (0.968626) *and* decorrelated. Decorrelation is necessary and
+nowhere near sufficient — it is a multiplier on strength, not a substitute for it. The practical
+consequence, and the reason this is written down: **"it will be different" is not a hypothesis.** A
+probe justified only by expected decorrelation is now measured to be worth −0.000001.
+
+Corollary for the seed question, priced rather than argued: `A1seed` — the one seed-only twin we own
+— contributes **−0.000001**, matching the public library's measurement of a seed-averaged member at
++0.000000. The standing instruction not to spend on seed variants is correct on our own data.
+
+### The cheap CPU round — three untried levers, three misses
+
+Config-only strict twins, no new code, no GPU, no submissions. Each targeted *strength on a different
+representation*, which is the only mechanism this pack has ever responded to. Gates pre-registered in
+`notes` before the results were read: solo ≥ parent + 0.0002, **and** ≥ +0.0002 to the 22-leg stack.
+
+| probe | run | solo | vs parent | max corr | stack Δ |
+|---|---|---|---|---|---|
+| **N1** `fe_normalization` | `8f40573b` | 0.968099 | −0.000081 | **0.9977** | −0.000000 |
+| **N2** `fe_interaction` | `ceb7f8c0` | 0.968162 | −0.000018 | 0.9978 | +0.000001 |
+| **N3** `num_as_cat` | `ad5e827a` | 0.966291 | −0.001256 | 0.9783 | +0.000029 |
+| all three admitted | | | | | **+0.000032** |
+
+- **N1 — the 24-hour budget is not a second composition.** `free_time = 24 − sleep − screen` is
+  structurally identical to the screen-time constraint that cleared on all three engines at 5–6× the
+  gate, and it had *more* rows to act on (80.9% coverage vs 61.0%). It still produced a model at
+  **0.9977** correlation with its parent — the highest correlation anywhere in the pack, above even
+  the `F1real`/`K1real` rerun pair. The composition family did not work because it was a budget; it
+  worked because `other_hours` is a **latent variable at solo AUC 0.765** that the trees could not
+  otherwise reach. `free_time` has no such quantity behind it.
+- **N2 — `fe_interaction` did not lose because the base couldn't use it.** It lost by 0.0003 in the
+  pre-target-encoding era and by 0.00002 now, on a base carrying TE, the composition family and
+  Optuna params. That settles the ambiguity the probe was built for, in favour of the lookup reading:
+  a ratio is a monotone transform and cannot represent a lookup table.
+- **N3 is the informative one, and it prices the §6 wall directly.** It is the tree-side version of
+  `L1lookupt`'s representation — value as *label*, not magnitude. Against the orphan `D2numcat`,
+  which uses the same representation on a much weaker base:
+
+  | | solo | max corr | stack Δ |
+  |---|---|---|---|
+  | `D2numcat` (old base) | 0.962343 | 0.9717 | +0.000030 |
+  | `N3numcat` (modern base) | 0.966291 | 0.9783 | +0.000029 |
+
+  **+0.0040 of solo strength bought −0.000001 of stack contribution.** The leg got stronger and, by
+  exactly enough to cancel it, less decorrelated. That is the §6 wall as a *quantitative trade*
+  rather than a correlation across legs: moving along the wall is free and worthless. `L1lookupt` did
+  not move along it — it was simultaneously our strongest leg **and** our most decorrelated, which is
+  why it was worth +0.0013 on the leaderboard and why nothing since has repeated it.
+
+**Round closed with zero submissions.** `0a3c852e` (22 legs, OOF 0.969314, **LB 0.97056**) stands.
+Seven consecutive probes have now landed inside ±0.00007 of the stack: TabM +0.000027, `fe_impute`
++0.000059, nonlinear meta −0.000042, orphan admission +0.000047, N1 −0.000000, N2 +0.000001,
+N3 +0.000029. Per §8, that is the stop signal, and it is a much sharper one than a single miss.
 
 ## Experiment log
 
