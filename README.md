@@ -1180,6 +1180,50 @@ correctly framed as selection rather than as evidence.
 champion, so Final A carries no conflict between the two criteria — but it beats `0a3c852e` by
 0.00004 against a resolution of 0.00014. The two are tied; prefer the 23-leg on OOF.
 
+### Tabular foundation models — subsetting is not the obstacle, the representation is
+
+The reason this repo never tried a TFM was TabPFN v2's ~10k-row ceiling against our 691,369.
+**That reason has expired:** TabPFN-3 states 1,000,000 × 200, TabICLv2 states 500K with CPU/disk
+offload. Our table fits inside both. And for an in-context learner, "fit on a subset and extend to
+the whole dataset" is not a workaround at all — the training set *is* the context, so ensembling
+over subsets is free.
+
+Measured on fold 0 of the frozen partition, 20k query rows, ~15 min on the local 3060 —
+**zero Kaggle GPU hours, zero submissions.** `scripts/tfm_probe.py`. AUC standard error at
+n=20k is ±0.002, so these are not comparable to `runs.csv` OOF at the fourth decimal; every gap
+below is ten times that.
+
+| arm | what | AUC |
+|---|---|---|
+| **A** single context, raw | 4k → 8k → 16k → 32k → 69k | 0.9337 → 0.9369 → 0.9385 → 0.9394 → **0.9402** |
+| **B** 8 *disjoint* 16k contexts, 128k rows, logit-averaged | the proposal, done properly | **0.9398** |
+| **C** one 16k context, **target-encoded** representation | changes only the representation | **0.9588** (upper bound) |
+
+Arm A is flat by 32k — the last doubling buys +0.0008. Arm B sees nearly twice the rows of a
+single 69k context and **does not beat it** (0.9398 vs 0.9402, inside noise); the ensemble had
+converged by block 4. Both plateau at ~0.940, our worst leg ever, 0.022 below the pool floor.
+
+Arm C moves the *same model* with the *same 16k context* by **+0.019 by changing only the
+representation**, against +0.007 from a 17× larger context — and it is an *upper bound*, since its
+context rows see their own labels through the TE (query rows are clean, so the comparison errs in
+the honest direction).
+
+**Mechanism:** this data is a value→target lookup table (rates 0.119–0.986, Pearson(value, rate)
+= −0.044, cardinality to 1,459). A TFM normalises an integer code and reads it as a *magnitude*, so
+it cannot see a non-monotonic lookup table however much context it is handed.
+
+**Do not build a TFM leg.** The ceiling is representational — Phase 4's finding arriving from a
+third independent direction, and the first time it has held for a model family pretrained by
+someone else on data that is not ours. Even optimistic arm C enters at ~0.958 against a pool floor
+of 0.9622, Phase 3 measured that a sub-pool-strength leg contributes nothing however decorrelated,
+and Phase 5's 33% transfer ratio takes whatever is left. **What would change this answer:** a TFM
+whose preprocessing treats high-cardinality integer columns as *categorical* rather than numeric.
+Arm A is the two-line rerun that would test it.
+
+*(TabICLv2 over TabPFN-3 for a non-technical reason: TabICL is BSD-3, while the TabPFN-3 weights
+carry a licence forbidding commercial and production use. A no-prize Playground competition is very
+probably fine under it — but "very probably fine" is not a licence review, and BSD cost nothing.)*
+
 ## Experiment log
 
 `experiments/runs.csv` is append-only and tracked in git — one row per run, with a long free-text
