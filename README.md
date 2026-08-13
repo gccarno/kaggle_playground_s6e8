@@ -648,25 +648,54 @@ Both finals are submitted, so both are selectable at the deadline (2026-08-31).
 
 | | run | construction | OOF | LB |
 |---|---|---|---|---|
-| **Final A** | `ffb65555` | 5 legs, nested-selected | **0.967733** | **0.96892** |
-| **Final B** | `2b54a858` | 13 legs, **no selection step** | 0.967567 | 0.96873 |
+| **Final A** | `7f69fcf6` | 23 legs, gated pool, `C` selected on the grid | **0.969434** | **0.97060** |
+| **Final B** | `c21b8df8` | 25 legs, **fixed rule**, `C` pinned at 0.1 | 0.969425 | 0.97058 |
 
-**Final A** is the honest champion: best OOF, best LB, simplest defensible recipe.
+**Final A** is the honest champion: best OOF *and* best LB, so the two selection criteria agree and
+there is nothing to trade off. (It beats the 22-leg `0a3c852e` at 0.97056 by 0.00004 against a
+resolution of 0.00014 — those two are tied, and the tie is broken on OOF.)
 
-**Final B** is the variance-reduced twin, and it is *worse* on OOF (−0.000166, on all five folds) and
-worse on LB (−0.00019). That is the point, and it is the same shape as S6E7's Final B, which scored
-0.00010 worse and was correct. Two sources of variance are removed:
+**Final B** is the variance-reduced twin, and it is *worse* on both axes — −0.000009 OOF and
+−0.00002 LB. That is the point, and it is the same shape as S6E7's Final B, which scored 0.00010
+worse and was correct. Every step fitted on data is removed:
 
-- **No selection step.** Final A's subset came from a procedure run over 16,369 candidates. It was
-  stable (5/5 folds chose identically) but it is still a step fitted on data, with variance on an
-  unseen split. Final B applies a fixed rule — solo OOF ≥ 0.965 — and averages everything that passes.
-- **More models averaged**: 13 against 5. Mean per-row std across constituent legs falls 0.03112 →
-  0.02772.
+- **No admission gate.** Final A's 23 legs are the survivors of a per-probe +0.0002 gate — a
+  procedure run on data, with variance on an unseen split. Final B applies one threshold, solo
+  OOF ≥ 0.965, to every leg we own, and takes whatever passes.
+- **No grid search.** `C` is pinned at 0.1 rather than chosen from `C_GRID`.
+- **Membership is mechanical.** `stack_logit.fixed_rule_legs()` derives the 25 run_ids from
+  `runs.csv` plus the `experiments/preds/` inventory; nothing is hand-typed, and re-running
+  reproduces the list exactly.
 
-**Deliberately excluded from Final B:** `K1 RealMLP` and `K2 FT-Transformer`, the Kaggle-T4 reruns.
-They would add two legs and probably a better number, but they are duplicate *recipes* of `F1real`
-and `G1ftt` already in the pool — averaging them is seed-bagging at the blend level, which is ruled
-out for this competition. Recorded here because the omission is deliberate and costs score.
+**What the rule changes, in both directions.** It *admits* three legs the gates rejected — `N1`
+`fe_normalization` (0.968099), `N2` `fe_interaction` (0.968162), `N3` `num_as_cat` (0.966291), the
+Phase 3 cheap round, all of which cleared solo and missed the stack gate. A fixed rule cannot honour
+a gate, because the gate is exactly the fitted step Final B exists to remove. It *drops* one:
+`K4 NODE` at 0.962186, below the threshold — and NODE took the third-largest |weight| in the fitted
+16-leg stack, so that is the expensive half. In the event the two roughly cancelled: the three
+admitted probes take small weights (+0.3181, −0.2446, +0.1977), matching Phase 3's measurement that
+they contribute nothing. 12 of 25 weights are negative, against 10 of 23 in Final A.
+
+**Phase 5 is why this hedge is better motivated than the previous one.** The CV→LB offset decays as
+legs are added, which means the fitted meta-model's OOF grows more optimistic with member count, and
+`honest_oof` cannot remove it because every leg's OOF came from this same partition. Final A is the
+larger fitted selection; Final B pins what it can and admits by rule.
+
+**Superseded:** the original finals were `ffb65555` (5 legs, nested-selected, 0.967733 / 0.96892)
+and `2b54a858` (13 legs, no selection step, 0.967567 / 0.96873), both equal-weight means from before
+the fitted stack existed and both ~0.0017 LB below what is above. That pair's Final B cost −0.00019;
+this one costs −0.00002.
+
+> **A deviation found while rewriting this section, recorded rather than fixed.** The old Final B
+> deliberately excluded `K1 RealMLP` (`cd2dbce4`) and `K2 FT-Transformer` (`46859c68`), the Kaggle-T4
+> reruns, on the grounds that they are duplicate *recipes* of `F1real` and `G1ftt` and averaging them
+> is seed-bagging at the blend level. **Both pairs are in both current pools** — they entered when
+> the Phase 2 stack pool was assembled, and nobody noticed the earlier principle had lapsed. The
+> fitted weights show what the stacker does with them: `F1real` +0.1469 against `K1` −0.1096, and
+> `K2` −0.1819 against `G1ftt` +0.0229 — near-cancelling opposite signs, i.e. the meta-model fitting
+> the *difference* between two runs of one recipe, which is seed noise. It has not measurably cost
+> anything (Final A is the LB champion), and removing them now would itself be a selection step made
+> after seeing scores, which is exactly what Final B exists to avoid. Flagged, not repaired.
 
 ## Public-frontier audit (2026-08-07)
 
@@ -1223,6 +1252,93 @@ Arm A is the two-line rerun that would test it.
 *(TabICLv2 over TabPFN-3 for a non-technical reason: TabICL is BSD-3, while the TabPFN-3 weights
 carry a licence forbidding commercial and production use. A no-prize Playground competition is very
 probably fine under it — but "very probably fine" is not a licence review, and BSD cost nothing.)*
+
+## Phase 6 — the remaining gap is a rule, not a model
+
+Phase 5 concluded that no leg we know how to build can move this leaderboard. The obvious next
+question is whether that is a fact about *us* or a fact about the *problem*. It is neither: it is a
+fact about a constraint we chose. Measured 2026-08-12, 1,635 teams.
+
+**We are rank 248 at 0.97060. #1 is 0.97124. The entire distance is 0.00064 AUC.**
+
+### The leaderboard's shape is the finding
+
+Scores in the top 400 do not form a continuum. They pile into identical spikes:
+
+| score | teams |
+|---|---|
+| 0.97092 | **36** |
+| 0.97086 | 23 |
+| 0.97098 | 19 |
+| 0.97084 | 17 |
+| 0.97095 | 15 |
+
+Agreement to five decimal places is not convergence — it is the same file. The #1-voted notebook,
+`najiama/s6e8-addiction-lb-0-97097`, is **four cells that read `18_blend_submission.csv` from a
+private dataset and write it to `submission.csv`.** Its author states plainly that the feature
+engineering and training code stay private, and that the CSV is itself a weighted blend of Szymon's
+OOF library, Omid's XGB/RealMLP/TabM, and Ravi's L2Stack. **That one CSV is rank 60.**
+
+**180 teams sit in 0.97080–0.97100, and that band is a download.** Only 26 teams are above 0.97100
+and 8 above 0.97110 — and the top of the leaderboard carries 58–75 submissions apiece, which is
+public-split hill-climbing, the S6E7 failure mode.
+
+### Is the gap signal or split noise? Both, in different places
+
+Paired bootstrap over our own 691k OOF rows, our 23-leg stack against `naji05` — rank-correlated
+0.984, i.e. genuinely different recipes rather than near-twins:
+
+| | rows | SD of paired ΔAUC |
+|---|---|---|
+| public @20% | 59,260 | **0.000096** |
+| private @80% | 237,041 | 0.000039 |
+| **single absolute score, public** | 59,260 | **0.000631** |
+
+Read those two scales together. The 0.0003 gap to the cluster is **3σ — real, and it would replicate.**
+But a single score's absolute noise, 0.00063, **exceeds the whole spread from rank 248 to rank 1**.
+Paired *differences* are readable; public *rank* at this density is mostly which rows landed in the
+split. Both statements are true at once, and confusing them is how a leaderboard eats a month.
+
+### What that leaves
+
+Three questions that had been collapsing into one:
+
+1. **Is our modelling exhausted?** Yes, and measured: Phase 5's transfer ratio puts a leg that
+   exactly clears the +0.0002 OOF gate at +0.00007 LB, below what the split resolves.
+2. **Is there headroom on the leaderboard?** Yes — and it is a *prediction-sharing* gap, not a
+   modelling gap.
+3. **Is that headroom reachable by us?** No. `public_gap.py` had already localised the entire
+   missing niche at +0.000478 OOF, concentrated in `naji05`/`naji03` — the recipe whose code is
+   private. We cannot reimplement what nobody published.
+
+Using the public artifacts is **legal** under Kaggle rules and is what most of the teams above us
+are doing. **We declined it, knowingly, at a measured cost of roughly 180 places.** The rule that
+every model we ship is one we trained was put on the table with that price attached and reaffirmed
+on 2026-08-12. It is the binding constraint on our final score, and it is a constraint, not a
+finding — recorded here so that no future reader mistakes our rank for our ceiling.
+
+> **Do not read the public leaderboard for guidance again.** Its top is a shared CSV, the ordering
+> inside 0.0002 is split noise, and acting on either is the S6E7 failure mode.
+
+### Final B, and what removing the selection apparatus cost
+
+Final B (below) was rebuilt under a rule fixed in advance, which incidentally answered a question
+Phase 3 had only half-answered. Replacing **every** fitted selection step — the admission gates that
+curated Final A's 23 legs, and the `C` grid search — with one threshold and a pinned constant moved
+the leaderboard by **−0.00002**, a seventh of its resolution.
+
+Phase 3 showed that the nine gate-*rejected* orphans added +0.000047 when admitted. Phase 6 shows
+the complementary thing: **the gates themselves are worth about +0.00002 LB in total.** The
+apparatus was honest, carefully run, and not load-bearing.
+
+The offset also got a fifth point, at 0.001155 for 25 legs against 0.001166 for 23. Phase 5 read
+four points as a monotonic decay and pre-registered −0.00110; the truth came in 0.000055 above that.
+**The decay is flattening, not continuing** — 22→23 fell 0.000080, 23→25 fell 0.000011 — so the
+offset looks like it is asymptoting near 0.00115 rather than sliding to zero. Caveat, and it is not
+small: Final B pins `C` and differs in pool *composition*, so this point is not on the same curve as
+the other four. It is evidence against the offset falling without limit, not a fitted fifth point.
+Phase 5's **transfer-ratio** argument is untouched by it, because that argument is about marginal
+ΔOOF → ΔLB rather than the offset's level.
 
 ## Experiment log
 
