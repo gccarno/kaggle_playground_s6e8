@@ -30,6 +30,7 @@ is the arbiter, and the offset prediction is pre-registered in the run notes.
 Usage:
     python scripts/stack_logit.py --submit --notes "..."
     python scripts/stack_logit.py --runs 7ebde432 fdeaa047 ... --no-submit
+    python scripts/stack_logit.py --pool fixed-rule --submit --notes "..."   # Final B
 """
 import argparse
 import csv
@@ -59,6 +60,45 @@ EPS = 1e-6
 # The top of the curve is flat to about one part in a million, but its argmax MOVES as the
 # member set changes, so a pinned value can silently end up on a slope.
 C_GRID = [0.1, 1.0]
+
+# --- Final B's fixed rule (README section 7) ------------------------------------------
+# Final A's 23-leg pool is the output of admission gates -- a procedure fitted on data,
+# with variance on an unseen split. Final B removes that step by defining its pool with a
+# threshold chosen once and applied without judgement, and by pinning C instead of picking
+# it. It is EXPECTED to score below Final A; that is what it is for.
+FIXED_RULE_MIN_SOLO = 0.965
+FIXED_RULE_C = 0.1
+# A stack or blend is a combination of legs, so admitting one would count its members
+# twice. Both the tag and the artifact name are checked: the tag is what we write today,
+# the artifact name is what the file itself says, and a future run tagged something new
+# would still be caught by the second test (including a re-run of this very function).
+COMBINATION_TAGS = ("blend", "logit_stack")
+COMBINATION_LEARNERS = ("blend", "stack")
+
+
+def fixed_rule_legs():
+    """Every leg we own whose solo OOF clears FIXED_RULE_MIN_SOLO. No gate, no selection.
+
+    Mechanical by construction: the member list is derived from experiments/runs.csv and
+    the experiments/preds/ inventory, never hand-typed, so re-running reproduces it.
+    """
+    runs = pd.read_csv(REPO_ROOT / "experiments" / "runs.csv")
+    keep = []
+    for _, row in runs.iterrows():
+        rid = str(row["run_id"])
+        if rid in keep or str(row.get("run_tag")) in COMBINATION_TAGS:
+            continue
+        oof = sorted(glob.glob(str(PREDS / rid / "oof_proba_*.csv")))
+        test = sorted(glob.glob(str(PREDS / rid / "test_proba_*.csv")))
+        if not oof or not test:
+            continue
+        if Path(oof[0]).stem.replace("oof_proba_", "") in COMBINATION_LEARNERS:
+            continue
+        solo = pd.to_numeric(row.get("final_oof_auc"), errors="coerce")
+        if pd.isna(solo) or float(solo) < FIXED_RULE_MIN_SOLO:
+            continue
+        keep.append(rid)
+    return sorted(keep)
 
 
 def load_legs(run_ids):
@@ -101,13 +141,28 @@ def honest_oof(X, y, folds, C):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--runs", nargs="+", default=list(LEGS.values()),
-                    help="run_ids under experiments/preds/ (default: the 16-leg pool)")
+    ap.add_argument("--runs", nargs="+", default=None,
+                    help="run_ids under experiments/preds/ (default: the curated pool)")
+    ap.add_argument("--pool", choices=("curated", "fixed-rule"), default="curated",
+                    help="curated = the gated LEGS pool (Final A); "
+                         "fixed-rule = every leg with solo OOF >= 0.965, C pinned (Final B)")
+    ap.add_argument("--C", type=float, default=None,
+                    help="pin the regularisation instead of searching C_GRID")
     ap.add_argument("--submit", action="store_true")
     ap.add_argument("--notes", default="")
     args = ap.parse_args()
 
-    names, P, PT, folds, ids, truth = load_legs(args.runs)
+    if args.pool == "fixed-rule":
+        assert args.runs is None, "--pool fixed-rule derives its own members; do not pass --runs"
+        runs = fixed_rule_legs()
+        # Pinning C is part of the rule: selecting it on the grid is a fitted step.
+        args.C = FIXED_RULE_C if args.C is None else args.C
+        print(f"fixed rule: solo OOF >= {FIXED_RULE_MIN_SOLO}, C pinned at {args.C}\n"
+              f"{len(runs)} legs admitted: {' '.join(runs)}\n")
+    else:
+        runs = args.runs if args.runs is not None else list(LEGS.values())
+
+    names, P, PT, folds, ids, truth = load_legs(runs)
     y = truth["addicted_label"].to_numpy()
     L = logit(np.clip(P, EPS, 1 - EPS))
     LT = logit(np.clip(PT, EPS, 1 - EPS))
@@ -121,14 +176,17 @@ def main():
                if all(r in idx for r in champ_ids) else float("nan"))
 
     best = (-1.0, None, None)
-    for C in C_GRID:
+    for C in (C_GRID if args.C is None else [args.C]):
         p = honest_oof(L, y, folds, C)
         a = roc_auc_score(y, p)
         print(f"  stack C={C:<5g} honest OOF {a:.6f}   vs equal-weight champion {a - a_champ:+.6f}")
         if a > best[0]:
             best = (a, C, p)
     auc, C, stack_oof = best
-    print(f"\nselected C={C}, OOF {auc:.6f}")
+    print(f"\n{'pinned' if args.C is not None else 'selected'} C={C}, OOF {auc:.6f}")
+
+    label = (f"Final B fixed-rule stack, {len(names)} legs, C={C}" if args.pool == "fixed-rule"
+             else f"logit stack, {len(names)} legs, C={C}")
 
     # Test predictions come from a meta-model fit on ALL OOF rows. Known and accepted
     # asymmetry: test predictions are averages over 5 fold-models while OOF predictions
@@ -155,6 +213,7 @@ def main():
     sub.to_csv(dest / "submission.csv", index=False)
     (dest / "manifest.json").write_text(json.dumps(
         {"sources": [n.split(":")[0] for n in names], "learners": names, "C": C,
+         "pool": args.pool, "C_pinned": args.C is not None,
          "coef": final.coef_[0].tolist(), "oof_auc": auc,
          "equal_weight_champion_oof": a_champ}, indent=1), encoding="utf-8")
 
@@ -168,7 +227,7 @@ def main():
     if args.submit:
         out = subprocess.run(["kaggle", "competitions", "submit", COMPETITION,
                               "-f", str(dest / "submission.csv"),
-                              "-m", f"logit stack, {len(names)} legs, C={C}"],
+                              "-m", label],
                              capture_output=True, text=True, cwd=REPO_ROOT)
         print(out.stdout or out.stderr)
         if out.returncode != 0:
@@ -194,7 +253,7 @@ def main():
         "git_commit": subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
                                      text=True, cwd=REPO_ROOT).stdout.strip(),
         "kernel_ref": "stack", "run_tag": "logit_stack",
-        "description": f"logit stack over {len(names)} legs, C={C}",
+        "description": label,
         "final_oof_auc": round(float(auc), 6), "public_lb_score": score,
         "n_folds": 5, "cv_seed": 42,
         "preds_dir": dest.relative_to(REPO_ROOT).as_posix(), "notes": args.notes,
