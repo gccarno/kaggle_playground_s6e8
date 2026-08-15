@@ -4,6 +4,10 @@ This file is the **contract**. The decisions recorded here are made once and nev
 every prediction artifact in `experiments/preds/` is keyed to them. Changing any of them
 retroactively invalidates cross-run blending. See `KAGGLE_PLAYBOOK.md` §1.
 
+`FEATURES.md` is the companion write-up: feature importance, every engineered family and its measured
+effect by model, what was reused across models, and what selection was and was not done. It is a
+re-analysis of this file and `experiments/runs.csv` and adds no new decisions.
+
 ## Competition facts
 
 | | |
