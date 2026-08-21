@@ -25,8 +25,8 @@ from sklearn.linear_model import LogisticRegression
 from stack_logit import EPS, PREDS, REPO_ROOT, honest_oof, load_legs
 from subset_ceiling import LEGS
 
-STACK_C = 0.1          # the shipped stack's C, so the delta is comparable to 0a3c852e
-SHIPPED = 0.969314     # 0a3c852e, 22 legs, LB 0.97056
+STACK_C = 0.1          # the shipped stack's C, so the delta is comparable to 7f69fcf6
+SHIPPED = 0.969434     # 7f69fcf6, 23 legs, LB 0.97060 -- Final A
 
 
 def main():
@@ -83,8 +83,8 @@ def main():
         print(f"{'  corr vs L1lookupt':<22}{c[names.index('L1lookupt')]:>12.4f}")
     print(f"{'|weight| rank in stack':<22}{rank:>9} of {len(w)}")
     print("-" * 56)
-    print(f"{'22-leg stack (shipped)':<22}{base:>12.6f}")
-    print(f"{'23-leg stack':<22}{with_it:>12.6f}")
+    print(f"{'23-leg stack (shipped)':<22}{base:>12.6f}")
+    print(f"{'24-leg stack':<22}{with_it:>12.6f}")
     d = with_it - base
     print(f"{'CONTRIBUTION':<22}{d:>+12.6f}{args.gate:>12.4f}"
           f"{('CLEARS' if d >= args.gate else 'MISS'):>10}")

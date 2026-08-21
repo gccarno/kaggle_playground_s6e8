@@ -40,7 +40,11 @@ LEGS = {"B6": "f64e2781", "B7": "6e3dd7c3", "B8": "9e68c7ce", "B10x": "7ebde432"
         # most decorrelated (max corr 0.9796 against a pack whose own median max-corr is
         # 0.9941), which is the counter-example to the section 6 wall.
         "B2xgb": "f047412f", "B2blgb": "7d1de67e", "B2ccat": "e73f6257",
-        "L1lookupt": "dada9e2d", "M1tabm": "f1d249bd", "B3imp": "54db2990"}
+        "L1lookupt": "dada9e2d", "M1tabm": "f1d249bd", "B3imp": "54db2990",
+        # Phase 4. R1mnca is Final A's 23rd leg (7f69fcf6, OOF 0.969434, LB 0.97060).
+        # It was left out of this dict when it was run, so every gate-2 measurement
+        # since Phase 4 has been taken against a 22-leg pool that is NOT what shipped.
+        "R1mnca": "9107a864"}
 # G2/K3 TabTransformer (0.9533) and E3 raw-MLP (0.9405) stay out. The original reason given
 # here -- "measured strictly harmful" -- was measured under an EQUAL-WEIGHT MEAN, where a weak
 # leg can only dilute; it is not evidence about a fitted combiner, which can subtract. They

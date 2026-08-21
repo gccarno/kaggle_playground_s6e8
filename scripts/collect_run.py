@@ -106,6 +106,21 @@ def push_kernel(metadata=None, accelerator=None):
     print(out.stdout); print(out.stderr, file=sys.stderr)
     if out.returncode != 0:
         raise RuntimeError(f"kaggle kernels push failed: {out.stderr}")
+    # kaggle-cli EXITS 0 ON A FAILED PUSH and reports the failure only on stdout, e.g.
+    # "Kernel push error: Maximum batch GPU session count of 2 reached." (Kaggle allows
+    # exactly two concurrent GPU sessions.) Trusting the exit code cost two fabricated
+    # rows in runs.csv: the push was rejected, the kernel of that name was still sitting
+    # COMPLETE from its PREVIOUS run, so polling returned immediately, the OLD artifacts
+    # were downloaded, and the OLD RUN_METRICS_JSON was archived under a NEW run_id --
+    # a row that looks like an experiment and is a copy of one from days earlier. Fail
+    # here instead: a rejected push must never reach the poller.
+    blob = out.stdout + out.stderr
+    if re.search(r'(?i)\bpush error\b|\berror:', blob):
+        raise RuntimeError(
+            'kaggle kernels push was REJECTED (the cli still exited 0): '
+            + ' '.join(blob.split())
+            + '  --  nothing was pushed, so polling would have collected the '
+            + 'PREVIOUS run output and archived it under a new run_id.')
     # Best-effort: kaggle-cli's exact push-success wording isn't guaranteed across
     # versions, so this may return None -- that's fine, only --submit needs a
     # version and it falls back to submitting the file directly.

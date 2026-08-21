@@ -80,6 +80,18 @@ DEFAULTS = {
                                    # feeding its value. The regularised answer to D2: a split
                                    # on a 231-level column overfits, an embedding under weight
                                    # decay is the same lookup fitted with a penalty.
+    "ftt_miss_mask": False,        # V-C1: give the ftt/tabtf branch the missingness-mask
+                                   # block the MLP branch has always had. FEATURES.md 2.9
+                                   # note 3 records the difference between the two branches
+                                   # as "an inconsistency ... not a decision".
+    "lookup_scalar_only": False,   # V-C3: lookupt/mnca WITHOUT the per-value embedding --
+                                   # rank-gauss + PLR scalars only. Phase 4's one open
+                                   # question, and the controlled test of the claim that
+                                   # the REPRESENTATION (not the architecture) is the unit
+                                   # of ensemble value.
+    "lookup_allow_te": False,      # V-C4: relax the te_cols ban on the lookup learners.
+                                   # FEATURES.md 2.8 backs that ban with an assert and a
+                                   # mechanism argument, never a measurement.
     "lgb_params":    {},           # merged over the baseline params (all learners read it)
     "n_estimators":  8000,
     "early_stop":    400,
@@ -533,7 +545,7 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
                 cols.append({"tr": ctr[itr], "va": ctr[iva], "te": cte}[which])
             return torch.from_numpy(np.stack(cols, 1).astype("int64"))
 
-        num_cols = [c for c in Xtr.columns if c not in cat_cols]
+        num_cols = [c for c in Xtr.columns if c not in AS_CATEGORY]
 
         # Imputation and standardisation are fit on the TRAINING FOLD ONLY and applied to
         # val/test -- the same rule as the target encoder. A tree needed neither, so this
@@ -546,7 +558,7 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
             num = ((df[num_cols].fillna(med) - mu) / sd).to_numpy(dtype="float32")
             miss = df[num_cols].isna().to_numpy(dtype="float32")       # missingness is signal
             parts = [num, miss]
-            for c in cat_cols:
+            for c in AS_CATEGORY:
                 codes = df[c].cat.codes.to_numpy()                     # -1 for NaN
                 oh = np.zeros((len(df), len(df[c].cat.categories) + 1), dtype="float32")
                 oh[np.arange(len(df)), codes + 1] = 1.0                # column 0 == missing
@@ -657,10 +669,16 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
         # budget columns are continuous and get PLR tokens only. te_cols must be empty for
         # this learner -- the embedding IS the lookup, so a target encoding on top would be
         # the same structure read twice and would recorrelate this leg with the tree pack.
-        assert not TE_COLS, (f"{CFG['learner']}: set te_cols=[] -- "
-                             "the embedding already IS the lookup")
+        # V-C4. The ban is real reasoning -- the embedding IS the lookup, so a target
+        # encoding on top reads the same structure twice and should recorrelate this leg
+        # with the tree pack, destroying the only thing it was built for. But it has only
+        # ever been an assert, never a measurement, and this leg is worth +0.00052.
+        # lookup_allow_te lifts it for exactly one probe; the default keeps the guard.
+        assert not TE_COLS or CFG["lookup_allow_te"], (
+            f"{CFG['learner']}: set te_cols=[] -- the embedding already IS the lookup "
+            "(set lookup_allow_te to measure this rather than assume it)")
         LOOK_NUM = [c for c in RAW_NUM if c in FEATURES]
-        LOOK_CAT = list(cat_cols)
+        LOOK_CAT = list(AS_CATEGORY)
         PLR_ONLY = [c for c in FEATURES if c not in LOOK_NUM + LOOK_CAT]
 
         # Built once and reused across folds: this is an UNSUPERVISED value->int mapping
@@ -768,10 +786,17 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
                                               nn.Dropout(hp["drop"]), nn.Linear(d, 1))
                 def forward(self, idx, cn, cm, dn, dm):
                     B = idx.shape[0]
+                    # V-C3 lookup_scalar_only: below, the per-value token is ZEROED rather
+                    # than the module skipped, so every shape, the position embedding and
+                    # the parameter count stay identical and the ONLY thing that changes is
+                    # whether the exact-value lookup is readable. That is what makes this an
+                    # attribution test of the representation rather than a smaller model.
                     # Built by concatenation rather than in-place assignment into emb(idx):
                     # an in-place write into a tensor that requires grad is an autograd hazard
                     # for no gain here.
                     tok = self.emb(idx)
+                    if CFG["lookup_scalar_only"]:
+                        tok = torch.zeros_like(tok)
                     if self.plr_n is not None:
                         # Missing -> the smooth term is switched OFF and only Embedding[0]
                         # remains, i.e. a learned per-column "missing" vector.
@@ -914,6 +939,8 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
                         nn.Linear(hp["hidden"], hp["dout"]))
                 def forward(self, idx, cn, cm, dn, dm):
                     tok = self.emb(idx)
+                    if CFG["lookup_scalar_only"]:
+                        tok = torch.zeros_like(tok)
                     if self.plr_n is not None:
                         smooth = self.plr_n(cn) * (1 - cm).unsqueeze(-1)
                         tok = torch.cat([tok[:, :NNUM] + smooth, tok[:, NNUM:]], 1)
@@ -1101,13 +1128,13 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
             from pytabkit import RealMLP_TD_Classifier as _PTK
         hp = {"n_epochs": 60, "batch_size": 1024, **CFG["lgb_params"]}
         Rtr, Rva, Rte = Xtr.copy(), Xva.copy(), Xte.copy()
-        for c in cat_cols:                       # pytabkit wants plain strings, no NaN
+        for c in AS_CATEGORY:                       # pytabkit wants plain strings, no NaN
             for d in (Rtr, Rva, Rte):
                 d[c] = d[c].astype(object).where(d[c].notna(), "__NA__").astype(str)
         # RealMLP rejects NaN in continuous columns. Impute with the TRAINING FOLD median
         # and keep an explicit missing indicator -- the EDA measured a non-trivial AUC on
         # several missing-indicators, so dropping that signal would be a silent loss.
-        r_num = [c for c in Xtr.columns if c not in cat_cols]
+        r_num = [c for c in Xtr.columns if c not in AS_CATEGORY]
         r_med = Rtr[r_num].median()
         for d in (Rtr, Rva, Rte):
             for c in r_num:
@@ -1119,7 +1146,7 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
             random_state=CFG["model_seed"], verbosity=0,
             val_metric_name="1-auc_ovr",   # binary auc_ovr IS roc_auc -- the metric, not a proxy
             **hp)
-        model.fit(Rtr, y[itr], X_val=Rva, y_val=y[iva], cat_col_names=cat_cols)
+        model.fit(Rtr, y[itr], X_val=Rva, y_val=y[iva], cat_col_names=AS_CATEGORY)
         Xva, Xte = Rva, Rte
         best_it = int(hp["n_epochs"])
 
@@ -1137,8 +1164,8 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
         hp = {"num_layers": 2, "num_trees": 128, "depth": 6, "batch": 4096,
               "epochs": 20, "patience": 4, "lr": 1e-3, **CFG["lgb_params"]}
 
-        ncat = [c for c in cat_cols]
-        ncon = [c for c in Xtr.columns if c not in cat_cols]
+        ncat = [c for c in AS_CATEGORY]
+        ncon = [c for c in Xtr.columns if c not in AS_CATEGORY]
 
         def frame(X_, y_=None):
             d = X_.copy()
@@ -1201,18 +1228,26 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
               "wd": 1e-5, "batch": 4096, "epochs": 30, "patience": 5, **CFG["lgb_params"]}
         dev = "cuda" if torch.cuda.is_available() else "cpu"
         torch.manual_seed(CFG["model_seed"])
-        num_cols = [c for c in Xtr.columns if c not in cat_cols]
-        card = [len(Xtr[c].cat.categories) + 1 for c in cat_cols]
+        num_cols = [c for c in Xtr.columns if c not in AS_CATEGORY]
+        card = [len(Xtr[c].cat.categories) + 1 for c in AS_CATEGORY]
 
         med = Xtr[num_cols].median()
         mu  = Xtr[num_cols].fillna(med).mean()
         sd  = Xtr[num_cols].fillna(med).std().replace(0, 1.0)
 
+        # V-C1. The MLP branch has always appended an isna() block here and this branch
+        # never did -- FEATURES.md 2.9 note 3 calls that "an inconsistency between two
+        # branches, not a decision". Same idiom as the mlp branch's to_tensor(), not a
+        # second one, so the two cannot drift.
+        N_CONT = len(num_cols) * (2 if CFG["ftt_miss_mask"] else 1)
+
         def tens(df):
-            n = torch.from_numpy(((df[num_cols].fillna(med) - mu) / sd)
-                                 .to_numpy(dtype="float32"))
+            z = ((df[num_cols].fillna(med) - mu) / sd).to_numpy(dtype="float32")
+            if CFG["ftt_miss_mask"]:
+                z = np.hstack([z, df[num_cols].isna().to_numpy(dtype="float32")])
+            n = torch.from_numpy(z)
             c = torch.from_numpy(np.stack(
-                [df[col].cat.codes.to_numpy() + 1 for col in cat_cols], 1).astype("int64"))
+                [df[col].cat.codes.to_numpy() + 1 for col in AS_CATEGORY], 1).astype("int64"))
             return n, c
 
         (Ntr, Ktr), (Nva, Kva), (Nte, Kte) = tens(Xtr), tens(Xva), tens(Xte)
@@ -1220,7 +1255,7 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
 
         if CFG["learner"] == "ftt":
             from rtdl_revisiting_models import FTTransformer
-            net = FTTransformer(n_cont_features=len(num_cols), cat_cardinalities=card,
+            net = FTTransformer(n_cont_features=N_CONT, cat_cardinalities=card,
                                 d_out=1, n_blocks=hp["n_blocks"], d_block=hp["d_token"],
                                 attention_n_heads=hp["heads"],
                                 attention_dropout=hp["dropout"], ffn_d_hidden=None,
@@ -1229,7 +1264,7 @@ for k, (itr, iva) in enumerate(skf.split(X, y)):
             fwd = lambda n_, c_: net(n_, c_).squeeze(-1)
         else:
             from tab_transformer_pytorch import TabTransformer
-            net = TabTransformer(categories=tuple(card), num_continuous=len(num_cols),
+            net = TabTransformer(categories=tuple(card), num_continuous=N_CONT,
                                  dim=hp["d_token"], depth=hp["n_blocks"], heads=hp["heads"],
                                  dim_out=1, attn_dropout=hp["dropout"],
                                  ff_dropout=hp["dropout"],
