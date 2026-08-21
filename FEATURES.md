@@ -221,6 +221,12 @@ information it previously had to build split-by-split, which was the pre-registe
 
 ### 2.3 B2 `fe_composition` — the budget constraint (**shipped, reused by all six later families**)
 
+> **Validation round (§5, 2026-08-20): the mechanism stated below does not survive.** The family was
+> carried to all six neural architectures it had never been given to. FT-Transformer — which attends
+> over every feature — took a full tree-sized **+0.001203**, while a plain MLP, which forms linear
+> combinations natively, took **+0.000299**. If "a 4-term linear combination axis-aligned splits
+> cannot build" were the obstacle, those two would rank the other way round. See §5.
+
 ```
 other_hours   = daily_screen_time_hours − (social_media_hours + gaming_hours + work_study_hours)
 share_{social,gaming,work,other} = each part / daily_screen_time_hours
@@ -257,6 +263,10 @@ pattern `README.md` names by hand: concluding *"X does not help"* from *"X did n
 place I put it."*
 
 ### 2.4 B3 `fe_impute` — imputation as extra columns (rejected on the second gate)
+
+> **Validation round (§5): dismissed on one engine; two more disagree.** XGBoost +0.000059,
+> **LightGBM +0.000200** and **MLP +0.000256** — both clearing gate 1. Still worth nothing in the
+> stack. See §5.
 
 One `XGBRegressor` per numeric column, fit on the observed rows of train ∪ test, predicting that
 feature from the other features. The imputed values are added as `imp_*` columns, and the whole
@@ -300,6 +310,12 @@ so, refuted a live worry that target encoding was inflating OOF (`README.md:145�
 
 ### 2.6 D2 / D2b `num_as_cat` — the unsupervised lever on the lookup structure (rejected, both scopes)
 
+> **Validation round (§5): the mechanism is CONFIRMED and correctly scoped to LightGBM.** CatBoost,
+> handed the identical two columns, showed **no `best_iter` collapse** (mean 3891 vs the parent's
+> 3851) where LightGBM collapsed 1860 → 503, and scored flat (−0.000017) rather than −0.004. Also:
+> this flag was **structurally unreachable on five of eight architectures** until §5 fixed it, so
+> "rejected, both scopes" was scoped to trees by an accident of the code. See §5.
+
 If values are labels rather than magnitudes, declaring the numeric columns **categorical** is the
 unsupervised way to act on that. Both scopes were tried on LightGBM and both lost badly:
 
@@ -324,6 +340,10 @@ The value of this pair is procedural: two LightGBM screens, seven minutes, zero 
 retired a CatBoost variant that would have cost a multi-hour kernel to reach the same answer.
 
 ### 2.7 The N-round — three untried levers on the modern base, three misses
+
+> **Validation round (§5): `fe_normalization` replicates on a second engine** — −0.000046 on
+> LightGBM against −0.000081 on XGBoost. The explanation was about the *feature*, so it had to
+> replicate or be an XGBoost fact. It replicated. See §5.
 
 Config-only strict twins on the Phase-2 base (TE + composition + Optuna params). Gates
 pre-registered in `notes` before the results were read: solo ≥ parent + 0.0002 **and** ≥ +0.0002 to
@@ -359,6 +379,11 @@ could not use it. It lost because a ratio cannot represent a lookup table.
 almost exactly enough to cancel it, less decorrelated.
 
 ### 2.8 L1 — the lookup representation (**shipped; the largest feature-side win after TE**)
+
+> **Validation round (§5): the `te_cols` ban is CONFIRMED, by the pre-registered correlation test.**
+> Lifting it moved max |corr| vs the pool from **0.9796 to 0.9934** (pool median 0.9945) — the
+> recorrelation this section predicted — while solo fell 0.000617 and the leg's contribution fell
+> from +0.00052 to +0.000046. The `assert` was guarding against something real. See §5.
 
 Not a feature *column* but a feature *representation*, and the distinction is the point.
 
@@ -488,6 +513,9 @@ lost:
 
 ### 3.3 The three flat categoricals were kept, untested
 
+> **Validation round (§5): now tested, and "cost nothing to carry" is wrong in sign.** Dropping the
+> three columns **loses 0.000198**. Keeping them was right, for a reason nobody had established.
+
 `gender` (0.5120), `stress_level` (0.5031), `academic_work_impact` (0.5019) are within 0.012 of chance
 univariately, and the baseline LightGBM spends **3.71% of its splits and 0.45% of its gain** on all
 three combined (§1.3). `drop_flat_cats` exists as a `CFG` flag (`build_model_nb.py:70`) and **was
@@ -513,6 +541,11 @@ matter."
 | dropping near-duplicate columns | none exist — 1 duplicate row-pair in 565,846 |
 
 ### 3.5 One combination that was never run, recorded rather than rationalised
+
+> **Validation round (§5): acted on.** All six neural architectures were re-run with the family, and
+> the five that are pool members were measured **jointly**, as one pre-registered set: **+0.000009**
+> added to a 28-leg pool, **−0.000003** swapped in at constant 23-leg pool size. The oversight was
+> real; its cost is not. See §5.
 
 The composition family cleared at 5–6× the gate on **all three tree engines**. Checking the
 `engineered` column of `experiments/runs.csv` against every neural run:
@@ -560,8 +593,14 @@ Ranked by what they were measured to be worth, not by any attribution score.
 
 1. **`notifications_per_day` and `app_opens_per_day` read as lookup keys.** Solo AUC 0.492 and 0.541 —
    the two weakest columns in the dataset by the competition's own metric — carrying per-value
-   positive rates from 0.119 to 0.986. Extracting that structure supervised was worth **+0.003**, the
-   largest win in the competition. It is the whole reason target encoding, embeddings, and eventually
+   positive rates from 0.119 to 0.986. ~~Extracting that structure supervised was worth **+0.003**, the
+   largest win in the competition.~~ **Corrected in the validation round (§5): the +0.003 belongs to
+   the target-encoding family as a whole, not to these two columns.** A four-point partition on one
+   base and engine — no TE 0.962269, lookup-2 only 0.964434, monotone-7 only 0.966726, all-9
+   0.967547 — puts the *marginal* value of the two lookup columns **given** the other seven at
+   **+0.000821**, against **+0.003113** for the seven monotone columns given the lookup two. The
+   structural insight survives only per column: **+0.001082** each for the lookup pair against
+   **+0.000637** each for the monotone seven. It is the whole reason target encoding, embeddings, and eventually
    the Lookup-Transformer and ModernNCA exist in this repo.
 
 2. **`other_hours` — unaccounted screen time.** Not a column in the data: the residual of a generator
@@ -589,3 +628,303 @@ They were a column AUC calls worthless because its signal is non-monotone, and a
 exist in the data at all until a generator invariant is noticed. Both were found by looking at the
 *structure* of the columns rather than at an importance ranking, and both were confirmed by strict-twin
 ablation at the fold count we submitted with.
+
+---
+
+## 5. The validation round — measuring the assumptions this document recorded but never tested
+
+*Run 2026-08-20, after modelling was reopened. Every probe below is a strict twin: exactly one
+`CFG` field differs from its named parent, enforced by `run_local.py --diff-vs`, with the
+hypothesis and both gates written down before the run. The instruction for this round was to
+measure, not to re-argue expected value — so probes whose expected impact had already been
+argued to be negligible were run anyway.*
+
+Pool: the shipped 23-leg Final A (`7f69fcf6`, OOF 0.969434, LB 0.97060). Base recomputed at
+**0.969434** in every run below, so gate 2 is finally being measured against what actually
+shipped — before this round the probe tooling used a 22-leg pool that was missing `R1mnca`.
+
+Gate 1 = solo >= parent + 0.0002.  Gate 2 = >= +0.0002 to the stack, reported as **add**
+(pool grows) and **swap** (twin replaces its parent, pool size held constant). The swap is the
+honest one: Phase 5 measured that a growing pool inflates stack OOF.
+
+| # | probe | solo | vs parent | g1 | add | swap | g2 |
+|---|---|---|---|---|---|---|---|
+| A1 | `drop_flat_cats` lgb | 0.967349 | −0.000198 | miss | +0.000001 | +0.000001 | MISS |
+| C2 | `num_as_cat` tabtf | 0.957024 | **+0.002878** | **PASS** | +0.000011 | n/a | MISS |
+| C4 | `lookup_allow_te` | 0.968009 | −0.000617 | miss | +0.000046 | n/a | MISS |
+| C3 | `lookup_scalar_only` mnca | 0.945827 | **−0.022895** | miss | +0.000004 | n/a | MISS |
+| A3 | `te_smooth`=10 lgb | 0.967535 | −0.000012 | miss | −0.000000 | −0.000000 | MISS |
+| A4 | `fe_normalization` lgb | 0.967501 | −0.000046 | miss | −0.000000 | −0.000000 | MISS |
+| D2a | `fe_impute` lgb | 0.967747 | **+0.000200** | **PASS** | −0.000001 | −0.000001 | MISS |
+| D1 | `num_as_cat` cat | 0.968013 | −0.000017 | miss | +0.000006 | +0.000006 | MISS |
+| C1 | `ftt_miss_mask` ftt | 0.965350 | −0.000086 | miss | −0.000000 | +0.000001 | MISS |
+| B1 | `fe_composition` mlp | 0.966234 | **+0.000299** | **PASS** | +0.000002 | +0.000003 | MISS |
+| B2 | `fe_composition` embmlp | 0.966486 | **+0.000266** | **PASS** | +0.000000 | **−0.000013** | MISS |
+| B3 | `fe_composition` realmlp | 0.966714 | **+0.000598** | **PASS** | −0.000002 | −0.000002 | MISS |
+| B4 | `fe_composition` ftt | 0.966639 | **+0.001203** | **PASS** | +0.000001 | +0.000003 | MISS |
+| B5 | `fe_composition` tabtf | 0.963979 | **+0.010640** | **PASS** | +0.000001 | n/a | MISS |
+| B6 | `fe_composition` node | 0.964343 | **+0.002157** | **PASS** | +0.000005 | +0.000002 | MISS |
+| D3 | `fe_impute` mlp | 0.966191 | **+0.000256** | **PASS** | +0.000003 | +0.000000 | MISS |
+| D2b | `fe_impute` cat | 0.968385 | **+0.000355** | **PASS** | +0.000031 | **+0.000030** | MISS |
+
+**Ten of seventeen clear gate 1. None clears gate 2.** Every contribution lands inside +0.000046 —
+the largest, C4, being a leg that got *worse* in every other respect. Twelve of the fifteen land
+inside ±0.000013, a band narrower than the 0.000066 seed-noise floor.
+
+(C2 and C4 are not pool members, so they have no swap variant; C2's own pre-registered gate 1 was
+0.954346 against parent `f1424102`, which it clears — `leg_probe.py`'s fixed 0.9655 screen is a
+generic pool-admission heuristic, not this probe's gate.)
+
+### The joint composition measurement (§3.5's miss, answered)
+
+§3.5 is the largest single gap in the record: the composition family cleared at 5–6× the gate on
+all three tree engines and was never given to six neural architectures. Registered as ONE set
+before measuring, because summing individual contributions is invalid:
+
+| | OOF | vs 0.969434 |
+|---|---|---|
+| add all 5 → 28 legs | 0.969443 | **+0.000009** |
+| swap all 5 → 23 legs | 0.969431 | **−0.000003** |
+
+At constant pool size, giving five neural architectures the strongest engineered family in the
+repo makes the stack **very slightly worse**. §3.5's oversight was real; its cost is not.
+
+### E1 — the duplicate-recipe audit (README "Flagged, not repaired")
+
+Pre-registered: rebuild the finals without them only if dropping moves >= +0.0001.
+
+| pool | OOF | delta |
+|---|---|---|
+| 23 legs (shipped) | 0.969434 | — |
+| drop `K1real` | 0.969436 | +0.000002 |
+| drop `K2ftt` | 0.969436 | +0.000002 |
+| drop both (21 legs) | 0.969438 | +0.000004 |
+
+The near-cancelling opposite-sign weights ARE the meta-model fitting seed noise, as suspected —
+but removing them buys +0.000004, 25× below the pre-registered threshold. **Decision per
+pre-registration: recorded, left in place.** The finals are not rebuilt on this.
+
+### Mechanism findings — the part worth more than the scores
+
+**1. §2.6's `num_as_cat` mechanism is confirmed AND correctly scoped to LightGBM.**
+The pre-registered discriminator was `best_iter` collapse. LightGBM collapsed 1860 → 503 on
+these two columns. CatBoost, handed the identical columns:
+
+| | best_iters | mean |
+|---|---|---|
+| B2ccat parent | 3691 3188 3837 4021 4520 | 3851 |
+| D1 `num_as_cat` | 4069 3587 3504 3386 4909 | 3891 |
+
+**No collapse.** CatBoost's ordered target statistics are the nested, smoothed version of the
+thing §2.6 blames, and they defend exactly as predicted. So the mechanism is a fact about
+LightGBM's categorical splitter being an unsmoothed target encoder — not about cardinality.
+§2.6 was right about *why*, and wrong to retire a CatBoost variant on LightGBM's evidence: the
+CatBoost answer is flat (−0.000017), not the −0.004041 catastrophe LightGBM suffered.
+
+**2. §2.9 note 3's branch inconsistency resolves against the MLP branch.**
+Giving FT-Transformer the missingness mask *costs* 0.000086. §1.1 measured every missing
+indicator at AUC 0.500 ± 0.001; the mask adds 18 near-noise columns. The FTT branch was right to
+omit it and the MLP branch is carrying dead weight. This was never a decision — it was a
+difference between two code paths — and it now has a measurement.
+
+**3. §3.3's "cost nothing to carry" is wrong in sign.**
+Dropping the three flat categoricals *loses* 0.000198. They take 3.71% of splits for 0.45% of
+gain and are still worth more than nothing — a univariate-AUC dismissal missed interaction
+signal. Keeping them was right, for a reason nobody had established.
+
+**4. §2.7's `fe_normalization` explanation replicates on a second engine.**
+−0.000046 on LightGBM against −0.000081 on XGBoost. The claim was about the *feature*
+(`free_time` has no latent variable behind it), so it had to replicate or be an XGBoost fact.
+It replicated.
+
+**5. §2.4 dismissed `fe_impute` on one engine, and the second engine disagrees.**
+XGBoost +0.000059; **LightGBM +0.000200, which clears gate 1**; MLP +0.000256, also clearing.
+Three engines positive. The family is real at the leg level and still worth nothing in the
+stack (−0.000001, +0.000003).
+
+**6. Solo strength and ensemble value are different quantities, demonstrated cleanly.**
+`fe_composition` solo gains span 35× — +0.000266 (embedding-MLP) to +0.010640
+(TabTransformer) — and every stack contribution lands in +0.000001…+0.000005. B2's swap is
+outright **negative (−0.000013)** while being strictly better solo: the twin is better at
+predicting and worse at being different.
+
+**7. §2.3's stated mechanism does not survive.**
+§2.3 attributes the composition gain to "a 4-term linear combination axis-aligned splits cannot
+build at any data volume." But FT-Transformer, which tokenises and attends over every feature,
+took a full tree-sized +0.001203, while a plain MLP — which forms linear combinations natively —
+took +0.000299. If the arithmetic form were the obstacle, those two would rank the other way
+round. The consistent reading is `other_hours` as a **latent variable**: not derivable from the
+inputs without the generator invariant, so no architecture constructs it, and each gains in
+proportion to how much of the rest of the signal it was already missing. TabTransformer gains
+most (+0.010640) because §2.9 note 2's routing failure left it missing the most.
+
+**8. §2.8's target-encoding ban on LookupT is CONFIRMED — by the correlation, as pre-registered.**
+`te_cols` had to be empty on the lookup learners, enforced by an `assert` and never measured. The
+claim: "the embedding IS the lookup; a target encoding on top would read the same structure twice
+and RECORRELATE this leg with the tree pack." The pre-registered falsification was the
+correlation, not the score.
+
+| | L1lookupt (`dada9e2d`) | C4 `lookup_allow_te` (`1afd2192`) | pool median |
+|---|---|---|---|
+| max \|corr\| vs pool | 0.9796 | **0.9934** | 0.9945 |
+| solo OOF | 0.968626 | 0.968009 (−0.000617) | — |
+| contribution | +0.00052 | +0.000046 | — |
+
+Correlation rose 0.9796 → 0.9934, 87% of the distance to the pool median, exactly the predicted
+direction and nearly the predicted magnitude. The leg loses ~8/9 of its stack value. This is the
+sharpest mechanism confirmation of the round: the assertion was guarding against something that
+demonstrably happens, and L1lookupt's status as the counter-example to the §6 wall depends on it.
+
+**9. §2.9 note 2's routing diagnosis is CONFIRMED, and `num_as_cat` reverses sign off LightGBM.**
+C2 (`d1274fa7`) routed the two lookup columns into TabTransformer's attention — the repair note 2
+diagnosed and nobody performed.
+
+| engine | `num_as_cat` result |
+|---|---|
+| LightGBM D2 / D2b / N3 | −0.004041 / −0.001835 / −0.001256 |
+| CatBoost D1 | −0.000017 (no `best_iter` collapse) |
+| **TabTransformer C2** | **+0.002878** (0.954146 → 0.957024) |
+
+The pre-registered prediction was **the opposite sign to every LightGBM run**, on the mechanism that
+a TabTransformer categorical token is an embedding under weight decay rather than a splitter, so
+§2.6's overfit cannot occur. It reversed. Read together, D1 and C2 place §2.6's mechanism precisely:
+it is a fact about LightGBM's categorical splitter, neutral under CatBoost's ordered statistics, and
+*beneficial* where the categorical path is a learned embedding.
+
+C2 is also the sharpest measurement in the repo of the §6 strength/decorrelation wall. It is both
+**more decorrelated than almost anything we own** (max |corr| 0.9528 against a pool median of
+0.9945; only K3's 0.9251 is lower) **and** materially stronger than the TabTransformer baseline it
+replaces — and it contributes **+0.000011**, a eighteenth of the gate. Being different and being
+better at the same time is still not sufficient; the leg has to be strong in absolute terms, and at
+0.957 it is 0.012 below the pool.
+
+**10. §2.4's `fe_impute` rejection was made on the WEAKEST of four engines.**
+
+| engine | solo delta | gate 1 |
+|---|---|---|
+| XGBoost (B3, the engine §2.4 judged on) | +0.000059 | miss |
+| LightGBM (D2a) | +0.000200 | PASS |
+| MLP (D3) | +0.000256 | PASS |
+| **CatBoost (D2b)** | **+0.000355** | **PASS** |
+
+Three of four engines clear gate 1 and the gain rises monotonically away from the one engine the
+family was measured on. CatBoost's `best_iters` (mean 3570 vs the parent's 3851) show no collapse,
+so the 16 imputation columns are being used rather than overfit. §2.4's mechanism — "augment, never
+replace", argued from a NaN-native GBM learning a per-node default split direction — is contradicted
+at the leg level by its own second, third and fourth engines.
+
+D2b also produces the **largest swap of the round, +0.000030**, against a previous maximum of
++0.000006. It is still 6.6x below the gate, so nothing ships — but it is the one place where a
+better leg measurably improved the stack rather than vanishing into it.
+
+**11. Incidental: a shipped pool member contributes exactly nothing.**
+The D2b swap measurement reports the drop control, and removing `B2ccat` from Final A costs
+**+0.000000** (0.969434 -> 0.969434). The CatBoost composition leg is carried by the shipped stack
+and is worth nothing measurable in it. This is not an argument for removing it — that would be a
+selection step taken after seeing scores, the thing Final B exists to avoid — but it is a direct
+measurement of how saturated the 23-leg pool is: it has members whose entire contribution is zero.
+
+**12. Phase 4's central claim is REFUTED as stated: strength and decorrelation are separable, and
+the representation supplies only the first.**
+
+C3 is the run `README.md` Phase 4 named as "not run, and the one open question", with a prediction
+placed on the record *before* R1 ran and never revised. It was wrong on two of three counts:
+
+| | predicted | measured |
+|---|---|---|
+| solo | ≈ 0.966 | **0.945827** (−0.022895 vs R1mnca) |
+| max \|corr\| vs pool | **> 0.995** | **0.9502** (pool median 0.9945) |
+| contribution | ≈ 0 | +0.000004 ✓ |
+
+Removing the per-value embedding while leaving the mnca architecture untouched **destroyed the
+leg's strength and left its decorrelation intact**. The prediction assumed the two move together —
+that a leg stripped of the lookup representation would collapse *into* the pool. It collapsed in
+strength and stayed outside the pool.
+
+C3 and C4 are the same experiment run in opposite directions, and together they separate the axes:
+
+| probe | what changed | strength | correlation |
+|---|---|---|---|
+| C4 `lookup_allow_te` | representation ENRICHED (TE added on top of the embedding) | −0.000617, ~flat | **0.9796 → 0.9934, recorrelates** |
+| C3 `lookup_scalar_only` | representation REMOVED (embedding deleted) | **−0.022895, collapses** | 0.9502, stays decorrelated |
+
+So the per-value embedding is the unit of **strength**, and the decorrelation belongs to the
+architecture — the PLR/mnca path — which stays orthogonal to the tree pack even when crippled.
+Phase 4's formulation, "the representation is the unit of ensemble value and the architecture on
+top of it is close to a free variable", is right about where the *value* comes from and wrong about
+the architecture being free: the architecture is carrying the entire decorrelation.
+
+This also closes the round's argument about the §6 wall with three points on one line. Ranked by
+correlation, the three most decorrelated legs ever measured here contribute nothing:
+
+| leg | solo | max \|corr\| | contribution |
+|---|---|---|---|
+| K3 tabtf | 0.953339 | 0.9251 | −0.000001 |
+| C3 mnca scalar-only | 0.945827 | 0.9502 | +0.000004 |
+| C2 tabtf `num_as_cat` | 0.957024 | 0.9528 | +0.000011 |
+| *pool median* | *~0.967* | *0.9945* | *—* |
+
+Decorrelation is available cheaply and is worth nothing without strength. **Strength is the binding
+constraint**, and every probe in this round that had strength was redundant with something already
+in the pool.
+
+### What this round did not change
+
+Nothing shipped. **Seventeen probes cleared gate 1 ten times and gate 2 zero times**, and the two
+integration measurements — the joint composition set and the E1 duplicate audit — both came in an
+order of magnitude below their pre-registered thresholds. Final A (`7f69fcf6`) and Final B
+(`c21b8df8`) stand exactly as they were, and no submission was spent: the standing policy is to
+spend them on integrated stacks and on legs clearing gate 2 by >= 2x, and nothing cleared gate 2
+at all.
+
+The span is the point. Solo deltas across the round ran from **−0.022895 to +0.010640**, a range of
+0.033 AUC — and every stack contribution fell between **−0.000013 and +0.000046**. Whatever governs
+value in this pool, it is not leg quality.
+
+The value of the round is in the mechanism column, not the score column. Four claims this
+document made on argument alone are now confirmed by measurement (§2.6's LightGBM scoping,
+§2.8's recorrelation, §2.7's feature-level explanation, §3.3's keep-decision — the last one for
+the opposite reason to the one given). Two are refuted (§2.3's linear-combination mechanism,
+§4's attribution of +0.003 to the two lookup columns). One was never a decision at all and now
+has a measurement (§2.9 note 3). And one flag was found to be **unrunnable** on five of the eight
+architectures it was offered on, which is why its rejection had never been tested off trees.
+
+Two predictions of my own failed and are recorded as such: I expected the composition family to be
+wasted on TabTransformer (it produced the largest solo gain in the project, +0.010640), and Phase
+4's standing prediction for C3 — which I carried forward unchanged — was wrong on both solo and
+correlation. Finding 12 exists because that prediction was written down before the run and could
+therefore be checked.
+
+### A note on the experiment log for this round
+
+`experiments/runs.csv` carries **duplicate rows for several probes in this round**. They are a
+logging artifact, not duplicate experiments: the harness repeatedly killed the collector processes,
+the collectors were re-attached, and more than one of them archived the same completed kernel. The
+artifacts are byte-identical and every row's config matches its declared probe, so no measured
+value is affected — but any analysis of this file must de-duplicate on `run_tag` first. The file is
+append-only by contract and was left intact rather than rewritten; the earlier precedent for
+rewriting it (`README.md`, the fabricated-row incident) was *fabricated* data, which this is not.
+
+One "duplicate" is not one. **C3 ran twice independently** — once locally and once as a Kaggle T4
+kernel, same seed, same config — and is the only cross-platform reproducibility datapoint in the
+repo:
+
+| run | platform | OOF |
+|---|---|---|
+| `abcecdcd` | local GPU | 0.945831 |
+| `cde296ca` | Kaggle T4 | 0.945828 |
+
+A gap of **0.000003**, 22x inside the 0.000066 seed-noise floor. Torch on two different GPUs with
+the same seed reproduces this pipeline to the sixth decimal.
+
+### A code finding: `num_as_cat` was unreachable on five of eight architectures
+
+Every neural branch derived its column split from `cat_cols`, but the set of columns actually
+converted to `category` dtype is `AS_CATEGORY = cat_cols + NUM_AS_CAT`. So on any neural
+learner the `num_as_cat` columns stayed in `num_cols` while holding categorical dtype, and the
+run died on `'Categorical' with dtype category does not support reduction 'median'`.
+
+`num_as_cat` has been advertised in `DEFAULTS` for learners it could never run on. §2.6's
+"rejected, both scopes" was scoped to trees by an accident of the code, not by a decision.
+Fixed at the 11 sites that split on `cat_cols`; the change is a no-op at default config because
+`NUM_AS_CAT == []` makes the two lists equal, verified by generator diff.

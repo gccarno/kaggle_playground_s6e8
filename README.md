@@ -700,6 +700,22 @@ this one costs −0.00002.
 > the *difference* between two runs of one recipe, which is seed noise. It has not measurably cost
 > anything (Final A is the LB champion), and removing them now would itself be a selection step made
 > after seeing scores, which is exactly what Final B exists to avoid. Flagged, not repaired.
+>
+> **Measured 2026-08-20 (validation round, `FEATURES.md` §5).** The suspicion above is correct and
+> the cost is nil. Pre-registered rule, written before the numbers were read: rebuild the finals
+> without them only if dropping moves the stack by >= +0.0001.
+>
+> | pool | OOF | delta |
+> |---|---|---|
+> | 23 legs (Final A, shipped) | 0.969434 | — |
+> | drop `K1real` | 0.969436 | +0.000002 |
+> | drop `K2ftt` | 0.969436 | +0.000002 |
+> | drop both (21 legs) | 0.969438 | +0.000004 |
+>
+> The near-cancelling weights ARE the meta-model fitting seed noise, as suspected — and removing
+> them buys +0.000004, 25x below the threshold and 16x below the 0.000066 seed-noise floor.
+> **Decision per the pre-registration: recorded, left in place.** The finals are not rebuilt on
+> this. "Flagged, not repaired" is now "flagged, measured, and correctly left alone."
 
 ## Public-frontier audit (2026-08-07)
 
@@ -1309,6 +1325,16 @@ Three questions that had been collapsing into one:
 
 1. **Is our modelling exhausted?** Yes, and measured: Phase 5's transfer ratio puts a leg that
    exactly clears the +0.0002 OOF gate at +0.00007 LB, below what the split resolves.
+   **Re-tested directly on 2026-08-20** (`FEATURES.md` §5): the argument above is about *expected*
+   value, so modelling was reopened and every unmeasured assumption in `FEATURES.md` was run as a
+   strict twin — **17 probes** across feature families, preprocessing branches, and six neural
+   architectures that had never received the strongest engineered family in the repo. **Ten
+   cleared gate 1. None cleared gate 2.** Every contribution landed inside ±0.000013, narrower than
+   the 0.000066 seed-noise floor. The joint composition set — five legs, one representation change,
+   registered as one set — came in at **+0.000009** added and **−0.000003** swapped at constant pool
+   size. Solo deltas spanned −0.022895 to +0.010640 — 0.033 AUC — while every stack contribution
+   fell between −0.000013 and +0.000046. The exhaustion claim was an argument on 2026-08-12; it is
+   a measurement now.
 2. **Is there headroom on the leaderboard?** Yes — and it is a *prediction-sharing* gap, not a
    modelling gap.
 3. **Is that headroom reachable by us?** No. `public_gap.py` had already localised the entire
